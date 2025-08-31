@@ -1,0 +1,40 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.example.mininative"
+    android:versionCode="1"
+    android:versionName="0.3">
+
+  <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34"/>
+
+  <uses-permission android:name="android.permission.INTERNET"/>
+  <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
+  <application
+      android:label="PW-net — audio streamer"
+      android:icon="@mipmap/ic_launcher">
+
+    <!-- SINGLE launcher -->
+    <activity
+        android:name=".MainActivity"
+        android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity>
+
+    <!-- MediaProjection consent (not launcher; used by MainActivity flow) -->
+    <activity
+        android:name=".CaptureActivity"
+        android:exported="false"
+        android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen" />
+
+    <!-- Foreground service for audio playback capture -->
+    <service
+        android:name=".StreamService"
+        android:exported="false"
+        android:foregroundServiceType="mediaProjection"/>
+  </application>
+</manifest>

@@ -1,0 +1,11 @@
+<resources>
+  <color name="mn_bg">#000000</color>
+  <color name="mn_cyan">#00FFFF</color>
+  <color name="mn_cyan_dim">#55CFCF</color>
+  <color name="mn_blue">#0A84FF</color>
+  <color name="mn_yellow">#FFC107</color>
+  <color name="mn_white">#FFFFFF</color>
+
+  <!-- adaptive icon background -->
+  <color name="ic_mn_bg">#000000</color>
+</resources>

@@ -1,0 +1,50 @@
+# --- build artifacts ---
+build/
+obj/
+libs/                    # ndk-build default output (we also copy to build/)
+out/
+
+# APKs / binaries
+*.apk
+*.ap_
+*.aab
+*.dex
+*.class
+*.o
+*.so
+
+# Packaging / archives / logs
+*.zip
+*.tar
+*.gz
+*.7z
+*.log
+
+# IDE / editors
+.idea/
+*.iml
+.gradle/
+local.properties
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Keystores & secrets (DO NOT COMMIT)
+*.keystore
+*.jks
+keystore.properties
+*.pem
+*.p12
+
+# tmp
+tmp/
+
+# Local env config (machine-specific)
+env.sh
+*.java.?
+*.xml.?
+
+src/org/example/mininative/Config.java
+
