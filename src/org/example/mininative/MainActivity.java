@@ -177,7 +177,10 @@ public class MainActivity extends Activity {
       @Override public void onClick(View v) {
         sendStop();
         Toast.makeText(MainActivity.this, "Exiting…", Toast.LENGTH_SHORT).show();
-        finish();
+        try { Thread.sleep(120); } catch (InterruptedException ignored) {}
+        stopService(new Intent(MainActivity.this, StreamService.class));
+        finishAndRemoveTask();
+        //finish();
       }
     });
     btns.addView(exitBtn, w());

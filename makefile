@@ -38,7 +38,9 @@ APK_REL  := $(OUT)/app-release.apk
 # sources
 CFG        := src/org/example/mininative/Config.java
 SRC_JAVA   := $(shell find src -type f -name "*.java")
-SRC_RES    := $(shell find res -type f -name "*.xml")
+#SRC_RES    := $(shell find res -type f -name "*.xml")
+SRC_RES    := $(shell find res -type f \( -name "*.xml" -o -name "*.png" -o -name "*.webp" \))
+
 JNI_MAIN   := jni/main.c
 JNI_MK     := jni/Android.mk
 

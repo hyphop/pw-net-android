@@ -19,7 +19,10 @@ import android.os.Build;
 import android.os.IBinder;
 import android.os.SystemClock;
 import android.util.Log;
-
+//import android.graphics.BitmapFactory;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.drawable.Drawable;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -29,7 +32,7 @@ public class StreamService extends Service implements Runnable {
   private static final String TAG = "MiniNativeStream";
 
   // intents / channel
-  private static final String CH = "pwnet_stream_v1";
+  private static final String CH = "pwnet_stream_v2";
   private static final int NID = 1001;
 
   private static final String ACT_STATE="org.example.mininative.STATE";
@@ -63,11 +66,15 @@ public class StreamService extends Service implements Runnable {
         Log.i(TAG, "stop requested (user)");
         stopping = true;
         running = false;
-        if (th != null) th.interrupt();
+        if (th != null) { th.interrupt(); th = null; } 
         // fall through to update notification/state
-        notifyStatus("STOPPING");
-        sendState("STOPPING", 0, 0, 0);
+        // notifyStatus("STOPPING");
+        // sendState("STOPPING", 0, 0, 0);
+        stopForeground(true);
+        cancelStatusNotification();
+        stopSelf();
         return START_NOT_STICKY;
+
       }
       if (ACT_SET_GAIN.equals(act)) {
         float g = i.getFloatExtra("value", gain);
@@ -115,33 +122,94 @@ public class StreamService extends Service implements Runnable {
     return START_STICKY;
   }
 
+private Bitmap bitmapFromDrawable(int resId, int dpSize) {
+    float density = getResources().getDisplayMetrics().density;
+    int px = Math.max(1, Math.round(dpSize * density)); // e.g., 48dp
+    Drawable d;
+    if (Build.VERSION.SDK_INT >= 21) {
+        d = getDrawable(resId);
+    } else {
+        d = getResources().getDrawable(resId);
+    }
+    if (d == null) return null;
+    Bitmap bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888);
+    Canvas c = new Canvas(bmp);
+    d.setBounds(0, 0, px, px);
+    d.draw(c);
+    return bmp;
+}
+
+  private int smallIconRes() {
+    int id = 0;
+    try { id = getResources().getIdentifier("ic_stat_pwnet", "drawable", getPackageName()); } catch (Throwable ignore) {}
+    Log.i(TAG, "small icon " + id);
+
+    if (id != 0) return id;
+
+    id = android.R.drawable.ic_media_play; // fallback if your drawable is missing
+    Log.i(TAG, "small icon safe " + id);
+
+    return id;
+
+  }
+/*
   private void ensureChannel() {
     if (Build.VERSION.SDK_INT >= 26) {
-      NotificationChannel ch = new NotificationChannel(CH, "PW-net streamer", NotificationManager.IMPORTANCE_LOW);
+      NotificationChannel ch = new NotificationChannel(CH, "PW-net streamer", NotificationManager.IMPORTANCE_DEFAULT);
       ch.setDescription("PW-net audio streamer");
+            ch.setShowBadge(false);
       ((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(ch);
     }
   }
 
+*/
+
+  private void ensureChannel() {
+    if (Build.VERSION.SDK_INT >= 26) {
+        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (nm.getNotificationChannel(CH) == null) {
+            NotificationChannel ch = new NotificationChannel(
+                CH, "PW-net streamer", NotificationManager.IMPORTANCE_DEFAULT);
+            ch.setDescription("PW-net audio streamer");
+            ch.setShowBadge(false);
+            nm.createNotificationChannel(ch);
+        }
+    }
+}
+
+private static String statusDot(String status) {
+    switch (status.toLowerCase()) {
+        case "connected":   return "\uD83D\uDD35"; // 🔵
+        case "connecting":  return "\uD83D\uDFE1"; // 🟡
+        default:            return "\u26AB";       // ⚫
+    }
+}
+
   private Notification buildNotif(String status) {
+
     PendingIntent openPI = PendingIntent.getActivity(
-        this, 1, new Intent(this, MainActivity.class),
-        (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0));
-    PendingIntent stopPI = PendingIntent.getService(
-        this, 2, new Intent(this, StreamService.class).setAction(ACT_STOP),
-        (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0));
-    Notification.Builder nb = (Build.VERSION.SDK_INT >= 26)
+       this, 1, new Intent(this, MainActivity.class),
+     (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0
+    ));
+
+      Notification.Builder nb = (Build.VERSION.SDK_INT >= 26)
         ? new Notification.Builder(this, CH)
         : new Notification.Builder(this);
-    String line = host + ":" + port + " • " + status;
+
+      if (Build.VERSION.SDK_INT >= 31) nb.setForegroundServiceBehavior(
+    Notification.FOREGROUND_SERVICE_IMMEDIATE);
+
+    String line = host + ":" + port + " " + statusDot(status) + " " + status.toLowerCase();
     return nb
         .setContentTitle("PW-net audio streamer")
         .setContentText(line)
+        //.setSmallIcon(smallIconRes())
         .setSmallIcon(R.drawable.ic_stat_pwnet)
+        .setLargeIcon(bitmapFromDrawable(R.drawable.ic_stat_pwnet, 48))
         .setOnlyAlertOnce(true)
-        .setOngoing("CONNECTED".equals(status) || "CONNECTING".equals(status))
+        .setShowWhen(false)
         .setContentIntent(openPI)
-        .addAction(android.R.drawable.ic_delete, "Stop", stopPI)
+        .setOngoing("CONNECTED".equals(status) || "CONNECTING".equals(status))
         .build();
   }
 
@@ -152,6 +220,13 @@ public class StreamService extends Service implements Runnable {
 
   private void notifyStatus(String status) {
     updateNotif(status);
+  }
+
+  private void cancelStatusNotification() {
+    Log.i(TAG, "stop notification");
+
+    NotificationManager nm = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
+    nm.cancel(NID);
   }
 
   private void sendState(String status, long txBytes, int kbps, int attempts) {
@@ -168,8 +243,11 @@ public class StreamService extends Service implements Runnable {
   @Override public IBinder onBind(Intent i) { return null; }
 
   @Override public void onDestroy() {
+    Log.i(TAG, "stop kill");
+
     running = false; stopping = true;
-    if (th != null) th.interrupt();
+    if (th != null) { th.interrupt(); th = null; }
+    cancelStatusNotification();
     super.onDestroy();
   }
 
@@ -201,6 +279,27 @@ public class StreamService extends Service implements Runnable {
       int minBuf = AudioRecord.getMinBufferSize(SR, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT);
       int recBuf = Math.max(bufBytes * 8, Math.max(minBuf, 4096));
       Log.i(TAG, "AudioRecord cfg sr=" + SR + " ch=" + CHN + " fmt=S16 minBuf=" + minBuf + " recBuf=" + recBuf + " chunk=" + bufBytes + "B");
+
+// What app icon is the row using?
+int appIcon = getApplicationInfo().icon;
+Log.i("MiniNativeStream", "app icon id=" + appIcon + " (" +
+    getResources().getResourceName(appIcon) + ")");
+
+// What channel importance are we on (API 26+)?
+if (Build.VERSION.SDK_INT >= 26) {
+  NotificationManager nm = getSystemService(NotificationManager.class);
+  NotificationChannel ch = nm.getNotificationChannel(CH);
+  if (ch != null) Log.i("MiniNativeStream", "channel " + CH + " importance=" + ch.getImportance());
+}
+
+// replace the failing debug with this:
+int round = getResources().getIdentifier("ic_launcher_round", "mipmap", getPackageName());
+if (round != 0) {
+  Log.i("MiniNativeStream", "round app icon id=" + round + " (" +
+      getResources().getResourceName(round) + ")");
+} else {
+  Log.i("MiniNativeStream", "round app icon not found");
+}
 
       rec = new AudioRecord.Builder()
           .setAudioPlaybackCaptureConfig(cfg)

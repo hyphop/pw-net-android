@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.example.mininative"
-    android:versionCode="1"
-    android:versionName="0.3">
+    android:versionCode="2"
+    android:versionName="0.4">
 
   <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34"/>
 
@@ -13,7 +13,9 @@
 
   <application
       android:label="PW-net — audio streamer"
-      android:icon="@mipmap/ic_launcher">
+      android:icon="@mipmap/ic_launcher"
+      android:roundIcon="@mipmap/ic_launcher_round"
+      >
 
     <!-- SINGLE launcher -->
     <activity
