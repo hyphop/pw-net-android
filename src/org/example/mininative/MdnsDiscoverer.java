@@ -39,7 +39,7 @@ public final class MdnsDiscoverer {
 
     public MdnsDiscoverer(Context ctx, String serviceType, Callback cb) {
         this.appCtx = ctx.getApplicationContext();
-        this.serviceType = (serviceType != null) ? serviceType : "_pwnet._tcp.local.";
+        this.serviceType = (serviceType != null) ? serviceType : Config.MDNS_SRV_NAME;
         this.cb = cb;
     }
 

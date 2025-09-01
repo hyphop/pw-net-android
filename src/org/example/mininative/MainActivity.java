@@ -235,7 +235,7 @@ public class MainActivity extends Activity {
   private void mdns_setup() {
     if (mdns != null) return;
 
-    mdns = new MdnsDiscoverer(getApplicationContext(), "_pwnet._tcp.local.",
+    mdns = new MdnsDiscoverer(getApplicationContext(), Config.MDNS_SRV_NAME,
       new MdnsDiscoverer.Callback() {
         @Override
         public void onService(final InetAddress host, final int port, final String[] txt) {

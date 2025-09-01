@@ -2,6 +2,7 @@
 
 HOST ?= 192.168.1.131
 PORT ?= 9999
+MDNS_SRV_NAME ?= _pwnet._tcp.local.
 
 APP_ID   := org.example.mininative
 MIN_SDK  := 24
@@ -90,6 +91,7 @@ $(CFG): FORCE
 	@printf 'package org.example.mininative;\n' > $(CFG)
 	@printf 'public final class Config {\n' >> $(CFG)
 	@printf '  public static final String HOST="%s";\n' "$(HOST)" >> $(CFG)
+	@printf '  public static final String MDNS_SRV_NAME="%s";\n' "$(MDNS_SRV_NAME)" >> $(CFG)
 	@printf '  public static final int PORT=%s;\n' "$(PORT)" >> $(CFG)
 	@printf '  public static final String BUILD="%s";\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $(CFG)
 	@printf '  public static final String GIT="%s";\n' "$$(git rev-parse --short HEAD 2>/dev/null || echo nogit)" >> $(CFG)
