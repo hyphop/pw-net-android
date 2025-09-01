@@ -42,7 +42,8 @@ public class MainActivity extends Activity {
 
   // colors
   private static final int CYAN  = 0xFF00FFFF;
-  private static final int CYAN_DIM = 0xFF55CFCF;
+  private static final int GRAY  = 0xFF666666;
+  private static final int CYAN_DIM = 0xFF009999;
   private static final int BG    = 0xFF000000;
   private static final int BLUE  = 0xFF0A84FF;
   private static final int YEL   = 0xFFFFD60A;
@@ -100,7 +101,14 @@ public class MainActivity extends Activity {
     hostEt.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
     hostEt.setText(prefs.getString(KEY_HOST, Config.HOST));
     styleEdit(hostEt);
-    root.addView(hostEt);
+
+    LinearLayout.LayoutParams lpHost = new LinearLayout.LayoutParams(
+    ViewGroup.LayoutParams.MATCH_PARENT,
+    ViewGroup.LayoutParams.WRAP_CONTENT
+    );
+    lpHost.setMargins(0, 0, 0, dp(8));  // top=8dp, bottom=4dp spacing
+                                        //
+    root.addView(hostEt,lpHost);
 
     // Port field
     portEt = new EditText(this);
@@ -281,10 +289,10 @@ if (!displayTxt.isEmpty()) {
 }
     TextView item = new TextView(this);
     item.setText(line);
-    item.setTextColor(CYAN);
+    item.setTextColor(CYAN_DIM);
     item.setPadding(dp(8), dp(4), dp(8), dp(4));
     item.setTextSize(16);
-    item.setBackground(makeBg(BG, CYAN));
+    item.setBackground(makeBg(BG, CYAN_DIM));
 
     // Click → copy to inputs
     item.setOnClickListener(new View.OnClickListener() {
@@ -298,9 +306,13 @@ if (!displayTxt.isEmpty()) {
         }
     });
 
-    candidatesLayout.addView(item,
-        new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-                                      ViewGroup.LayoutParams.WRAP_CONTENT));
+    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+    ViewGroup.LayoutParams.MATCH_PARENT,
+    ViewGroup.LayoutParams.WRAP_CONTENT
+    );
+
+    lp.setMargins(dp(0), dp(4), dp(0), dp(0));
+    candidatesLayout.addView(item, lp);
 
     mdnsEvents++;
     updateMdnsLabel();
