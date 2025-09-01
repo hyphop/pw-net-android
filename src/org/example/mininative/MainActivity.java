@@ -241,7 +241,12 @@ public class MainActivity extends Activity {
         public void onService(final InetAddress host, final int port, final String[] txt) {
           runOnUiThread(new Runnable() {
             @Override public void run() {
-              addCandidate(host, port, txt);
+              if ( txt != null ) {
+                addCandidate(host, port, txt);
+              } else {
+                mdnsEvents++;
+                updateMdnsLabel();
+              }
             }
           });
         }

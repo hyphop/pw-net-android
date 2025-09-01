@@ -111,10 +111,19 @@ public final class MdnsDiscoverer {
                     }
                 }
                 InetAddress host = (host4 != null) ? host4 : hostAny;
+
+                Log.i(TAG, "< " + info.getName() + "|" + info.getPort() );
+
                 if (host == null) return;
 
                 String key = info.getName() + "|" + info.getPort() + "|" + host.getHostAddress();
-                if (!seen.add(key)) return; // dedupe
+
+                if (!seen.add(key)) {
+                    // notify update
+                    if (cb != null) cb.onService(host, info.getPort(), null );
+                    // dedupe
+                    return;
+                }
 
                 // Build raw TXT key=value array
 List<String> txtList = new ArrayList<>();
