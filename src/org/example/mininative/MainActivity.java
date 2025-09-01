@@ -26,6 +26,9 @@ import java.net.InetAddress;
 public class MainActivity extends Activity {
   private MdnsDiscoverer mdns;
   private LinearLayout candidatesLayout;
+  private TextView mdnsLabel;
+  private int mdnsEvents = 0;
+
 
   private static final String TAG = "MainActivity";
   private static final String PREFS="mn_prefs";
@@ -71,6 +74,12 @@ public class MainActivity extends Activity {
       muteBtn.setText(muted ? "Unmute" : "Mute");
     }
   };
+
+  private void updateMdnsLabel() {
+    int c = (candidatesLayout != null) ? candidatesLayout.getChildCount() : 0;
+    if ( mdnsLabel != null ) mdnsLabel.setText("mDNS List [" + c + "/" + mdnsEvents + "]");
+    Log.i(TAG, "update mdns " + c + "/" + mdnsEvents );
+  }
 
   @Override protected void onCreate(Bundle b) {
     super.onCreate(b);
@@ -194,7 +203,7 @@ public class MainActivity extends Activity {
     root.addView(botTv);
 
     // mDNS label + list (UNDER status)
-    TextView mdnsLabel = t("mDNS List:");
+    mdnsLabel = t("mDNS List [0/0]");
     mdnsLabel.setTextColor(YEL);
     mdnsLabel.setPadding(0, dp(12), 0, dp(4));
     root.addView(mdnsLabel);
@@ -251,7 +260,7 @@ private void addCandidate(final InetAddress host, final int port, final String[]
 
     TextView item = new TextView(this);
     // Now shows:  name | host:port
-    item.setText(name + " | " + host.getHostAddress() + ":" + port);
+    item.setText(name + " " + host.getHostAddress() + ":" + port);
     item.setTextColor(CYAN);
     item.setPadding(dp(8), dp(4), dp(8), dp(4));
     item.setTextSize(16);
@@ -272,6 +281,9 @@ private void addCandidate(final InetAddress host, final int port, final String[]
     candidatesLayout.addView(item,
         new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                                       ViewGroup.LayoutParams.WRAP_CONTENT));
+
+    mdnsEvents++;
+    updateMdnsLabel();
 }
 
   @Override protected void onStart() {
@@ -279,6 +291,8 @@ private void addCandidate(final InetAddress host, final int port, final String[]
     Log.i(TAG, "onStart");
     mdns_setup();
     if (candidatesLayout != null) candidatesLayout.removeAllViews(); // fresh list
+    mdnsEvents = 0;                      // reset total events
+    updateMdnsLabel();                   // shows [0/0]
     mdns.start();
     Log.i(TAG, "mdns start()");
   }
