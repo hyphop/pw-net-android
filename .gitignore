@@ -48,3 +48,6 @@ env.sh
 
 src/org/example/mininative/Config.java
 
+# deps 
+deps/
+

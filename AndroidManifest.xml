@@ -11,6 +11,9 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
+  <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+  <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
+
   <application
       android:label="PW-net — audio streamer"
       android:icon="@mipmap/ic_launcher"
@@ -20,7 +23,9 @@
     <!-- SINGLE launcher -->
     <activity
         android:name=".MainActivity"
-        android:exported="true">
+        android:exported="true"
+        android:launchMode="singleTask"
+        >
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
         <category android:name="android.intent.category.LAUNCHER"/>

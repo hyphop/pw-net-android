@@ -258,7 +258,7 @@ public class StreamService extends Service implements Runnable {
 
   @Override
   public void onDestroy() {
-    Log.i(TAG, "stop kill");
+    Log.i(TAG, "onDestroy");
 
     running = false;
     stopping = true;

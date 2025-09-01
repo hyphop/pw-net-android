@@ -22,6 +22,42 @@ APKSIGN  ?= apksigner
 ADB      ?= adb
 NDKB     ?= ndk-build
 
+# --- deps (only edit DEPS_URLS) ---
+DEPS_DIR  := deps
+DEPS_URLS := \
+https://repo1.maven.org/maven2/javax/jmdns/jmdns/3.5.9/jmdns-3.5.9.jar \
+https://repo1.maven.org/maven2/org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.jar \
+https://repo1.maven.org/maven2/org/slf4j/slf4j-android/1.7.36/slf4j-android-1.7.36.jar
+
+DEPS_LIB := $(addprefix $(DEPS_DIR)/,$(notdir $(DEPS_URLS)))
+
+# --- COLON-JOIN, NO STRAY SPACES (shell-based, robust) ----------------------
+# Produces something like: deps/a.jar:deps/b.jar:deps/c.jar  (or empty)
+DEPS_CP := $(shell set -e; \
+  list="$(DEPS_LIB)"; \
+  list=$$(printf "%s\n" $$list | tr '\n' ' '); \
+  list=$$(printf "%s" "$$list" | tr -s '[:space:]' ' ' | sed -e 's/^ *//' -e 's/ *$$//'); \
+  [ -z "$$list" ] || printf "%s" "$$list" | sed 's/ /:/g' \
+)
+
+# Final classpath = platform + optional deps (NO extra spaces/colons)
+CP_ALL := $(PLAT)$(if $(DEPS_CP),:$(DEPS_CP))
+
+$(DEPS_DIR):
+	@mkdir -p $(DEPS_DIR)
+
+# download missing jars (idempotent)
+$(DEPS_LIB): | $(DEPS_DIR)
+	@bash -lc 'set -e; \
+	for u in $(DEPS_URLS); do \
+	  f="$(DEPS_DIR)/$${u##*/}"; \
+	  if [ ! -f "$$f" ]; then echo "[*] Fetch $$f"; curl -L -o "$$f" "$$u"; fi; \
+	done'
+
+# debug (optional): print classpath exactly as used
+print-cp:
+	@echo 'CP_ALL=$(CP_ALL)'
+
 # outputs
 OUT          := build
 OUT_GEN      := $(OUT)/generated          # aapt2 --java output dir (R.java in here)
@@ -78,17 +114,17 @@ $(APK_RAW): AndroidManifest.xml $(OUT_RESZIP)
 	  --java $(OUT_GEN)
 
 # --- 3) Java -> classes.jar -> classes.dex (R.java picked via -sourcepath) ---
-$(OUT_JAR): $(SRC_JAVA) $(CFG) $(APK_RAW)
+$(OUT_JAR): $(SRC_JAVA) $(CFG) $(APK_RAW) $(DEPS_LIB)
 	@mkdir -p $(OUT_CLASSES)
 	$(JAVAC) -source 1.8 -target 1.8 -encoding UTF-8 \
-	  -bootclasspath $(PLAT) -classpath $(PLAT) \
+	  -bootclasspath $(PLAT) -classpath "$(CP_ALL)" \
 	  -sourcepath src:$(OUT_GEN) -implicit:class \
 	  -d $(OUT_CLASSES) $(SRC_JAVA)
 	@cd $(OUT_CLASSES) && jar cf ../$(notdir $(OUT_JAR)) .
 
-$(OUT_DEX): $(OUT_JAR)
+$(OUT_DEX): $(OUT_JAR) $(DEPS_LIB)
 	$(D8) --release --min-api $(MIN_SDK) --lib $(PLAT) \
-	  --output $(OUT) $(OUT_JAR)
+	  --output $(OUT) $(OUT_JAR) $(DEPS_LIB)
 
 # --- 4) NDK .so ---
 $(OUT)/libs/$(ABI)/libmain.so: $(JNI_MAIN) $(JNI_MK)
@@ -123,7 +159,7 @@ uninstall:
 	-$(ADB) uninstall $(APP_ID) || true
 
 log:
-	$(ADB) logcat -s MiniNativeStream
+	$(ADB) logcat -s MiniNativeStream MainActivity MDNS
 
 re:
 	$(MAKE) -j && $(MAKE) install && $(MAKE) run
