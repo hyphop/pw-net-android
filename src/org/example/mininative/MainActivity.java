@@ -258,14 +258,29 @@ public class MainActivity extends Activity {
 private void addCandidate(final InetAddress host, final int port, final String[] txt) {
     if (candidatesLayout == null) return;
 
-    // Default to host if no name in TXT
-    String name = (txt != null && txt.length > 0 && txt[0] != null && !txt[0].trim().isEmpty())
-                  ? txt[0].trim()
-                  : host.getHostAddress();
+    // Default to host if no TXT or first TXT empty
+String displayTxt;
+if (txt != null && txt.length > 0) {
+    // join all TXT strings with spaces
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i < txt.length; i++) {
+        if (txt[i] != null && !txt[i].trim().isEmpty()) {
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(txt[i].trim());
+        }
+    }
+    displayTxt = sb.toString();
+} else {
+    displayTxt = ""; // no TXT records
+}
 
+// Always show IP:PORT, then optional TXT
+String line = host.getHostAddress() + ":" + port;
+if (!displayTxt.isEmpty()) {
+    line += " " + displayTxt;
+}
     TextView item = new TextView(this);
-    // Now shows:  name | host:port
-    item.setText(name + " " + host.getHostAddress() + ":" + port);
+    item.setText(line);
     item.setTextColor(CYAN);
     item.setPadding(dp(8), dp(4), dp(8), dp(4));
     item.setTextSize(16);

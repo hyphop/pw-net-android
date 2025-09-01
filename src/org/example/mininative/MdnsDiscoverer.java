@@ -12,6 +12,7 @@ import javax.jmdns.ServiceListener;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
@@ -23,7 +24,7 @@ import java.util.List;
 public final class MdnsDiscoverer {
     private static final String TAG = "MDNS";
 
-    // Simple callback: give host, port, and raw TXT[] lines
+    // Simple callback: give host, port, and raw TXT[] lines (arrival order preserved)
     public interface Callback {
         void onService(InetAddress host, int port, String[] txt);
     }
@@ -112,26 +113,20 @@ public final class MdnsDiscoverer {
                 }
                 InetAddress host = (host4 != null) ? host4 : hostAny;
 
-                Log.i(TAG, "< " + info.getName() + "|" + info.getPort() );
+                Log.i(TAG, "< " + info.getName() + "|" + info.getPort());
 
                 if (host == null) return;
 
                 String key = info.getName() + "|" + info.getPort() + "|" + host.getHostAddress();
 
                 if (!seen.add(key)) {
-                    // notify update
-                    if (cb != null) cb.onService(host, info.getPort(), null );
-                    // dedupe
+                    // notify update (no TXT on dup to keep it lightweight)
+                    if (cb != null) cb.onService(host, info.getPort(), null);
                     return;
                 }
 
-                // Build raw TXT key=value array
-List<String> txtList = new ArrayList<>();
-for (String keyName : Collections.list(info.getPropertyNames())) {
-    String val = info.getPropertyString(keyName);
-    txtList.add(keyName + "=" + (val != null ? val : ""));
-}
-String[] txt = txtList.toArray(new String[0]);
+                // === TXT in arrival order (raw RDATA parse) ===
+                String[] txt = parseTxtInOrder(info);
 
                 Log.i(TAG, "ok : name=" + info.getName()
                         + " host=" + host.getHostAddress()
@@ -144,6 +139,33 @@ String[] txt = txtList.toArray(new String[0]);
             }
         }
     };
+
+    // Parse ServiceInfo.getTextBytes() as a sequence of <len><bytes> strings, preserving order.
+    private static String[] parseTxtInOrder(ServiceInfo info) {
+        byte[] raw = info.getTextBytes();
+        if (raw == null || raw.length == 0) return new String[0];
+
+        List<String> out = new ArrayList<>();
+        int i = 0;
+        while (i < raw.length) {
+            int len = raw[i] & 0xFF;
+            i++;
+            if (len == 0) {
+                // zero-length string allowed; represent as empty
+                out.add("");
+                continue;
+            }
+            if (i + len > raw.length) {
+                // malformed/truncated; stop parsing to avoid OOB
+                break;
+            }
+            // TXT strings are opaque bytes; usually k[=v] in ASCII/UTF-8.
+            String s = new String(raw, i, len, StandardCharsets.ISO_8859_1);
+            out.add(s);
+            i += len;
+        }
+        return out.toArray(new String[0]);
+    }
 
     private void acquireMulticastLockSafe() {
         try {
