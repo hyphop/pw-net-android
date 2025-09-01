@@ -295,13 +295,13 @@ public class StreamService extends Service implements Runnable {
                             .build();
 
       int frameBytes = CHN * BYTES;
-      int chunkFrames = SR / 100; // 10 ms
+      int chunkFrames = SR / 50 ; // 10 ms
       int bufBytes = chunkFrames * frameBytes;
       int minBuf = AudioRecord.getMinBufferSize(SR, AudioFormat.CHANNEL_IN_STEREO,
                                                 AudioFormat.ENCODING_PCM_16BIT);
       int recBuf = Math.max(bufBytes * 8, Math.max(minBuf, 4096));
       Log.i(TAG, "AudioRecord cfg sr=" + SR + " ch=" + CHN + " fmt=S16 minBuf=" + minBuf +
-                     " recBuf=" + recBuf + " chunk=" + bufBytes + "B");
+                     " frames=" + chunkFrames + " recBuf=" + recBuf + " chunk=" + bufBytes + "B");
 
       // What app icon is the row using?
       int appIcon = getApplicationInfo().icon;
