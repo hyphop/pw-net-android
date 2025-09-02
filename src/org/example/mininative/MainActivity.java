@@ -22,6 +22,15 @@ import android.graphics.drawable.GradientDrawable;
 import android.util.Log;
 
 import java.net.InetAddress;
+import android.net.ConnectivityManager;
+import android.net.LinkAddress;
+import android.net.LinkProperties;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+
+import java.net.Inet6Address;
+import java.util.Enumeration;
+import java.util.Locale;
 
 public class MainActivity extends Activity {
   private MdnsDiscoverer mdns;
@@ -57,6 +66,72 @@ public class MainActivity extends Activity {
   private SharedPreferences prefs;
   private String status = "DISCONNECTED";
   private boolean muted = false;
+
+
+  private static java.util.List<String> getLocalWifiIPs(Context ctx) {
+    String ipv4 = null, ipv6 = null;
+
+    // Prefer active Wi-Fi network (API 21+)
+    try {
+        ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+        Network n = (cm != null) ? cm.getActiveNetwork() : null;
+        if (n != null) {
+            NetworkCapabilities caps = cm.getNetworkCapabilities(n);
+            if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                LinkProperties lp = cm.getLinkProperties(n);
+                if (lp != null) {
+                    for (LinkAddress la : lp.getLinkAddresses()) {
+                        java.net.InetAddress a = la.getAddress();
+                        if (a.isLoopbackAddress()) continue;
+                        if (a instanceof java.net.Inet4Address) {
+                            ipv4 = a.getHostAddress();
+                        } else if (a instanceof java.net.Inet6Address) {
+                            Inet6Address a6 = (Inet6Address) a;
+                            if (!a6.isLinkLocalAddress() && !a6.isMulticastAddress()) {
+                                String s = a6.getHostAddress();
+                                int pct = s.indexOf('%'); // drop scope id if present
+                                ipv6 = (pct >= 0) ? s.substring(0, pct) : s;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } catch (Throwable ignore) {}
+
+    // Fallback: scan wlan*/wifi* interfaces
+    try {
+        java.util.Enumeration<java.net.NetworkInterface> en = java.net.NetworkInterface.getNetworkInterfaces();
+        while (en.hasMoreElements() && (ipv4 == null || ipv6 == null)) {
+            java.net.NetworkInterface nif = en.nextElement();
+            if (nif == null || !nif.isUp() || nif.isLoopback() || nif.isVirtual()) continue;
+            String ln = (nif.getName() != null) ? nif.getName().toLowerCase(Locale.ROOT) : "";
+            if (!(ln.startsWith("wlan") || ln.contains("wifi"))) continue;
+
+            java.util.Enumeration<java.net.InetAddress> addrs = nif.getInetAddresses();
+            while (addrs.hasMoreElements() && (ipv4 == null || ipv6 == null)) {
+                java.net.InetAddress a = addrs.nextElement();
+                if (a.isLoopbackAddress()) continue;
+
+                if (a instanceof java.net.Inet4Address && ipv4 == null) {
+                    ipv4 = a.getHostAddress();
+                } else if (a instanceof java.net.Inet6Address && ipv6 == null) {
+                    Inet6Address a6 = (Inet6Address) a;
+                    if (!a6.isLinkLocalAddress() && !a6.isMulticastAddress()) {
+                        String s = a6.getHostAddress();
+                        int pct = s.indexOf('%');
+                        ipv6 = (pct >= 0) ? s.substring(0, pct) : s;
+                    }
+                }
+            }
+        }
+    } catch (Throwable ignore) {}
+
+    java.util.ArrayList<String> out = new java.util.ArrayList<>(2);
+    if (ipv4 != null) out.add(ipv4);
+    if (ipv6 != null) out.add(ipv6);
+    return out;
+  }
 
   private final BroadcastReceiver br = new BroadcastReceiver() {
     @Override public void onReceive(Context c, Intent i) {
@@ -105,6 +180,11 @@ public class MainActivity extends Activity {
     super.onCreate(b);
     prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
     Log.i(TAG, "created");
+
+    // just log the IPs on start
+    for (String ip : getLocalWifiIPs(this)) {
+        Log.i(TAG, "Local IP: " + ip);
+    }
 
     LinearLayout root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
@@ -225,6 +305,24 @@ public class MainActivity extends Activity {
 
     // Status lines
     topTv = t("TX 0 B  0 kb/s  attempts 0");
+    topTv.setClickable(true);
+
+topTv.setOnClickListener(new View.OnClickListener() {
+    @Override public void onClick(View v) {
+        java.util.List<String> ips = getLocalWifiIPs(MainActivity.this);
+        if (ips.isEmpty()) {
+            android.widget.Toast.makeText(MainActivity.this, "No Wi-Fi IPs found", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String msg = android.text.TextUtils.join(" ", ips);
+        android.widget.Toast.makeText(MainActivity.this, "Local/WiFi IPs: " + msg, android.widget.Toast.LENGTH_LONG).show();
+
+        android.content.ClipboardManager cm =
+            (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("local-ips", msg));
+    }
+});
+
     root.addView(topTv);
     botTv = t("Disconnected");
     root.addView(botTv);

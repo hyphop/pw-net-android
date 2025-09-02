@@ -27,6 +27,14 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import android.media.AudioManager;
+import java.util.Locale;
+
+
+import android.media.AudioManager;
+import android.media.AudioPlaybackConfiguration;
+import android.os.Handler;
+import android.os.Looper;
 
 public class StreamService extends Service implements Runnable {
   private static final String TAG = "MiniNativeStream";
@@ -270,38 +278,7 @@ public class StreamService extends Service implements Runnable {
     super.onDestroy();
   }
 
-  @Override
-  public void run() {
-    final int SR = 48000, CHN = 2, BYTES = 2;
-    AudioRecord rec = null;
-    MediaProjection mp = null;
-    int attempts = 0;
-
-    try {
-      MediaProjectionManager mpm =
-          (MediaProjectionManager)getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-      mp = mpm.getMediaProjection(resultCode, data);
-
-      AudioPlaybackCaptureConfiguration cfg =
-          new AudioPlaybackCaptureConfiguration.Builder(mp)
-              .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-              .addMatchingUsage(AudioAttributes.USAGE_GAME)
-              .build();
-
-      AudioFormat fmt = new AudioFormat.Builder()
-                            .setSampleRate(SR)
-                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                            .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
-                            .build();
-
-      int frameBytes = CHN * BYTES;
-      int chunkFrames = SR / 50 ; // 10 ms
-      int bufBytes = chunkFrames * frameBytes;
-      int minBuf = AudioRecord.getMinBufferSize(SR, AudioFormat.CHANNEL_IN_STEREO,
-                                                AudioFormat.ENCODING_PCM_16BIT);
-      int recBuf = Math.max(bufBytes * 8, Math.max(minBuf, 4096));
-      Log.i(TAG, "AudioRecord cfg sr=" + SR + " ch=" + CHN + " fmt=S16 minBuf=" + minBuf +
-                     " frames=" + chunkFrames + " recBuf=" + recBuf + " chunk=" + bufBytes + "B");
+  public void debug_info(){
 
       // What app icon is the row using?
       int appIcon = getApplicationInfo().icon;
@@ -327,12 +304,114 @@ public class StreamService extends Service implements Runnable {
         Log.i("MiniNativeStream", "round app icon not found");
       }
 
+  }
+
+
+
+  private static String encName(int enc) {
+  switch (enc) {
+    case AudioFormat.ENCODING_PCM_FLOAT: return "PCM_FLOAT32";
+    case AudioFormat.ENCODING_PCM_16BIT: return "PCM_16";
+    case AudioFormat.ENCODING_PCM_8BIT:  return "PCM_8";
+    default: return "ENC(" + enc + ")";
+  }
+}
+
+private static String inCfgName(int cfg) {
+  switch (cfg) {
+    case AudioFormat.CHANNEL_IN_MONO:   return "MONO";
+    case AudioFormat.CHANNEL_IN_STEREO: return "STEREO";
+    default: return "CFG(" + cfg + ")";
+  }
+}
+
+private void logAudioRecordConfig(AudioRecord rec) {
+  int sr        = rec.getSampleRate();
+  int enc       = rec.getAudioFormat();          // encoding
+  int chCount   = rec.getChannelCount();
+  int chCfg     = rec.getChannelConfiguration(); // deprecated, but useful for logging
+  int sessionId = rec.getAudioSessionId();
+  int state     = rec.getState();
+  int recState  = rec.getRecordingState();
+
+  Integer bufFrames = null;
+  try {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      bufFrames = rec.getBufferSizeInFrames();   // API 23+
+    }
+  } catch (Throwable ignored) {}
+
+  Log.i(TAG, String.format(Locale.US,
+      "AudioRecord cfg: sr=%d enc=%s ch=%d (%s) session=%d state=%s rec=%s bufFrames=%s",
+      sr, encName(enc), chCount, inCfgName(chCfg), sessionId,
+      (state==AudioRecord.STATE_INITIALIZED ? "INIT" : "UNINIT"),
+      (recState==AudioRecord.RECORDSTATE_RECORDING ? "RECORDING" : "STOPPED"),
+      (bufFrames!=null ? bufFrames.toString() : "n/a")));
+
+  // Also useful: output mixer props (what the device prefers for playback)
+  try {
+    AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+    String mixSR  = am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE);
+    String mixFPB = am.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER);
+    Log.i(TAG, "Output mix: SR=" + mixSR + " framesPerBuffer=" + mixFPB);
+  } catch (Throwable ignored) {}
+}
+
+  @Override
+  public void run() {
+
+    //debug_info();
+
+    final int SR = 48000, CHN = 2, BYTES = 2;
+    AudioRecord rec = null;
+    MediaProjection mp = null;
+    int attempts = 0;
+    boolean muted_state = !muted;
+
+    AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+    int mixSR = 0;
+    try {
+    String prop = am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE);
+    if (prop != null) mixSR = Integer.parseInt(prop);
+    } catch (Exception ignored) {}
+    //final int SR = mixSR;  // often 48000
+
+    Log.i(TAG, "mixSR " + mixSR);
+
+    try {
+      MediaProjectionManager mpm =
+          (MediaProjectionManager)getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+      mp = mpm.getMediaProjection(resultCode, data);
+
+      AudioPlaybackCaptureConfiguration cfg =
+          new AudioPlaybackCaptureConfiguration.Builder(mp)
+              .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+//              .addMatchingUsage(AudioAttributes.USAGE_GAME)
+              .build();
+
+      AudioFormat fmt = new AudioFormat.Builder()
+                            .setSampleRate(SR)
+                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                            .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
+                            .build();
+
+      int frameBytes = CHN * BYTES;
+      int chunkFrames = SR / 50 ; // 10 ms
+      int bufBytes = chunkFrames * frameBytes;
+      int minBuf = AudioRecord.getMinBufferSize(SR, AudioFormat.CHANNEL_IN_STEREO,
+                                                AudioFormat.ENCODING_PCM_16BIT);
+      int recBuf = Math.max(bufBytes * 8, Math.max(minBuf, 4096));
+      Log.i(TAG, "AudioRecord cfg sr=" + SR + " ch=" + CHN + " fmt=S16 minBuf=" + minBuf +
+                     " frames=" + chunkFrames + " recBuf=" + recBuf + " chunk=" + bufBytes + "B");
+
       rec = new AudioRecord.Builder()
                 .setAudioPlaybackCaptureConfig(cfg)
                 .setAudioFormat(fmt)
                 .setBufferSizeInBytes(recBuf)
                 .build();
       rec.startRecording();
+
+      logAudioRecordConfig(rec);
 
       byte[] buf = new byte[bufBytes];
       long t0 = SystemClock.elapsedRealtime();
@@ -361,11 +440,20 @@ public class StreamService extends Service implements Runnable {
 
           t0 = SystemClock.elapsedRealtime();
           bytesOut = 0;
-
           while (running && !stopping) {
             int n = rec.read(buf, 0, buf.length);
             if (n <= 0) break;
 
+            if (muted) {
+              if (muted_state != muted) {
+              muted_state = muted;
+              Log.i(TAG, "muted " + (muted ? "1" : "0") );
+              }
+              for (int i = 0; i < n; i++) buf[i] = 0;
+              //break;
+            }
+
+/*
             if (muted) {
               for (int i = 0; i < n; i++) buf[i] = 0;
             } else if (gain != 1.0f) { // in-place S16 gain 0..1
@@ -381,7 +469,7 @@ public class StreamService extends Service implements Runnable {
                 buf[i + 1] = (byte)((v >>> 8) & 0xFF);
               }
             }
-
+*/
             out.write(buf, 0, n);
             bytesOut += n;
 
