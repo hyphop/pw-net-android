@@ -29,12 +29,10 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import android.media.AudioManager;
 import java.util.Locale;
+import android.text.TextUtils;
 
-
-import android.media.AudioManager;
-import android.media.AudioPlaybackConfiguration;
-import android.os.Handler;
-import android.os.Looper;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 
 public class StreamService extends Service implements Runnable {
   private static final String TAG = "MiniNativeStream";
@@ -66,6 +64,17 @@ public class StreamService extends Service implements Runnable {
   private Intent data;
   private int resultCode;
   private Thread th;
+  private AudioManager am;
+
+  // resolve UID once
+  private static Integer resolveUidForPackage(android.content.Context ctx, String pkg) {
+  try {
+    ApplicationInfo ai = ctx.getPackageManager().getApplicationInfo(pkg, 0);
+    return ai.uid;
+  } catch (PackageManager.NameNotFoundException e) {
+    return null;
+  }
+  }
 
   @Override
   public int onStartCommand(Intent i, int flags, int id) {
@@ -261,6 +270,7 @@ public class StreamService extends Service implements Runnable {
 
   @Override
   public IBinder onBind(Intent i) {
+    Log.i(TAG, "onBind");
     return null;
   }
 
@@ -350,7 +360,6 @@ private void logAudioRecordConfig(AudioRecord rec) {
 
   // Also useful: output mixer props (what the device prefers for playback)
   try {
-    AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
     String mixSR  = am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE);
     String mixFPB = am.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER);
     Log.i(TAG, "Output mix: SR=" + mixSR + " framesPerBuffer=" + mixFPB);
@@ -361,14 +370,30 @@ private void logAudioRecordConfig(AudioRecord rec) {
   public void run() {
 
     //debug_info();
+    String CFG_PKG = Config.CAPTURE_APP_NAME;
+    int CAPTURE_APP_UID     = Config.CAPTURE_APP_UID;
+    String pkg_cap = (CFG_PKG != null) ? CFG_PKG.trim() : null;
+    Log.i(TAG, "Config setup: app=" + pkg_cap + " uid=" + CAPTURE_APP_UID);
+    Integer appUid = -1;
+
+    if (!TextUtils.isEmpty(pkg_cap)) {
+    appUid = resolveUidForPackage(this, pkg_cap);
+    Log.i(TAG, "Resolve : app " + pkg_cap + " uid=" + appUid);
+    if ( appUid == null )  {
+        appUid = CAPTURE_APP_UID;
+        Log.i(TAG, "Fail-Safe:  app " + pkg_cap + " uid=" + appUid);
+    }
+    }
 
     final int SR = 48000, CHN = 2, BYTES = 2;
+
     AudioRecord rec = null;
     MediaProjection mp = null;
     int attempts = 0;
     boolean muted_state = !muted;
-
-    AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+    int soft_volume = 0;
+    boolean anyMusic = false;
+    if (am == null) am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
     int mixSR = 0;
     try {
     String prop = am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE);
@@ -383,11 +408,18 @@ private void logAudioRecordConfig(AudioRecord rec) {
           (MediaProjectionManager)getSystemService(Context.MEDIA_PROJECTION_SERVICE);
       mp = mpm.getMediaProjection(resultCode, data);
 
-      AudioPlaybackCaptureConfiguration cfg =
+      AudioPlaybackCaptureConfiguration.Builder b =
           new AudioPlaybackCaptureConfiguration.Builder(mp)
-              .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-//              .addMatchingUsage(AudioAttributes.USAGE_GAME)
-              .build();
+              .addMatchingUsage(AudioAttributes.USAGE_MEDIA);
+
+      if (appUid > 0) {
+        Log.i(TAG, "Capture filter by appUID " + appUid);
+        b.addMatchingUid(appUid);
+      } else {
+        Log.i(TAG, "Whide system capture mode - low quality");
+      }
+
+      AudioPlaybackCaptureConfiguration cfg = b.build();
 
       AudioFormat fmt = new AudioFormat.Builder()
                             .setSampleRate(SR)
@@ -401,8 +433,14 @@ private void logAudioRecordConfig(AudioRecord rec) {
       int minBuf = AudioRecord.getMinBufferSize(SR, AudioFormat.CHANNEL_IN_STEREO,
                                                 AudioFormat.ENCODING_PCM_16BIT);
       int recBuf = Math.max(bufBytes * 8, Math.max(minBuf, 4096));
-      Log.i(TAG, "AudioRecord cfg sr=" + SR + " ch=" + CHN + " fmt=S16 minBuf=" + minBuf +
-                     " frames=" + chunkFrames + " recBuf=" + recBuf + " chunk=" + bufBytes + "B");
+      String fmt_audio = "s16";
+      Log.i(TAG, "AudioRecord cfg sr=" + SR
+              + " fmt=" + fmt_audio
+              + " ch=" + CHN
+              + " minBuf=" + minBuf
+              + " frames=" + chunkFrames
+              + " recBuf=" + recBuf
+              + " chunk=" + bufBytes + "B");
 
       rec = new AudioRecord.Builder()
                 .setAudioPlaybackCaptureConfig(cfg)
@@ -449,14 +487,10 @@ private void logAudioRecordConfig(AudioRecord rec) {
               muted_state = muted;
               Log.i(TAG, "muted " + (muted ? "1" : "0") );
               }
-              for (int i = 0; i < n; i++) buf[i] = 0;
-              //break;
-            }
-
-/*
-            if (muted) {
-              for (int i = 0; i < n; i++) buf[i] = 0;
-            } else if (gain != 1.0f) { // in-place S16 gain 0..1
+              //for (int i = 0; i < n; i++) buf[i] = 0; // zero data silent
+              n = 0; // no send data silent gap
+              soft_volume = 0;
+            } else if (gain != 1.0f ) { // Soft Volume - in-place S16 gain 0..1
               for (int i = 0; i < n; i += 2) {
                 int lo = buf[i] & 0xFF, hi = buf[i + 1];
                 int s16 = (hi << 8) | lo;
@@ -468,16 +502,26 @@ private void logAudioRecordConfig(AudioRecord rec) {
                 buf[i] = (byte)(v & 0xFF);
                 buf[i + 1] = (byte)((v >>> 8) & 0xFF);
               }
+              soft_volume = 1;
+            } else {
+              soft_volume = 0;
             }
-*/
+
             out.write(buf, 0, n);
             bytesOut += n;
 
             long dt = SystemClock.elapsedRealtime() - t0;
             if (dt >= 2000) {
               int kbps = (int)((bytesOut * 8L) / dt);
+              anyMusic = am.isMusicActive();
+
               Log.i(TAG, "tx ~" + kbps + " kb/s (" + bytesOut + "B/" + dt +
-                             "ms) gain=" + gain + " muted=" + muted);
+                             "ms) gain=" + gain
+                             + " muted=" + (muted ? 1 : 0 )
+                             + " music=" + (anyMusic ? 1 : 0)
+                             + " uid=" + appUid
+                             //+ " soft=" + soft_volume
+                             );
               sendState("CONNECTED", bytesOut, kbps, attempts);
               t0 = SystemClock.elapsedRealtime();
               bytesOut = 0;

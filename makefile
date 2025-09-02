@@ -4,6 +4,11 @@ HOST ?= 192.168.1.131
 PORT ?= 9999
 MDNS_SRV_NAME ?= _pwnet._tcp.local.
 
+#CAPTURE_APP_NAME ?= com.foobar2000.foobar2000
+CAPTURE_APP_NAME ?= ""
+#CAPTURE_APP_ID ?= 0
+CAPTURE_APP_ID ?= null
+
 APP_ID   := org.example.mininative
 MIN_SDK  := 24
 ABI      := arm64-v8a
@@ -91,11 +96,14 @@ $(CFG): FORCE
 	@printf 'package org.example.mininative;\n' > $(CFG)
 	@printf 'public final class Config {\n' >> $(CFG)
 	@printf '  public static final String HOST="%s";\n' "$(HOST)" >> $(CFG)
+	@printf '  public static final String CAPTURE_APP_NAME="%s";\n' "$(CAPTURE_APP_NAME)" >> $(CFG)
+	@printf '  public static final int CAPTURE_APP_UID=%d;\n' "$(CAPTURE_APP_UID)" >> $(CFG)
 	@printf '  public static final String MDNS_SRV_NAME="%s";\n' "$(MDNS_SRV_NAME)" >> $(CFG)
 	@printf '  public static final int PORT=%s;\n' "$(PORT)" >> $(CFG)
 	@printf '  public static final String BUILD="%s";\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $(CFG)
 	@printf '  public static final String GIT="%s";\n' "$$(git rev-parse --short HEAD 2>/dev/null || echo nogit)" >> $(CFG)
 	@printf '}\n' >> $(CFG)
+	@cat $(CFG)
 
 # --- 1) compile resources (entire res/ dir) ---
 $(OUT_RESZIP): $(SRC_RES)

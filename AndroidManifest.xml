@@ -14,6 +14,10 @@
   <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
   <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
 
+<queries>
+    <package android:name="com.foobar2000.foobar2000"/>
+</queries>
+
   <application
       android:label="PW-net — audio streamer"
       android:icon="@mipmap/ic_launcher"
@@ -43,5 +47,16 @@
         android:name=".StreamService"
         android:exported="false"
         android:foregroundServiceType="mediaProjection"/>
+
+    <service
+    android:name=".NLService"
+    android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+    android:exported="false"
+    android:label="MiniNativeStream Listener">
+     <intent-filter>
+       <action android:name="android.service.notification.NotificationListenerService"/>
+     </intent-filter>
+    </service>
+
   </application>
 </manifest>
