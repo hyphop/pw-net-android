@@ -169,7 +169,7 @@ uninstall:
 	-$(ADB) uninstall $(APP_ID) || true
 
 log:
-	$(ADB) logcat -s MiniNativeStream MainActivity MDNS
+	$(ADB) logcat -s MiniNativeStream MainActivity MDNS MediaWatchService
 
 re:
 	$(MAKE) -j && $(MAKE) install && $(MAKE) run

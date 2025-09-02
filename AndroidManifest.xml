@@ -15,8 +15,28 @@
   <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
 
 <queries>
-    <package android:name="com.foobar2000.foobar2000"/>
+  <!-- Browsers -->
+  <intent>
+    <action android:name="android.intent.action.VIEW"/>
+    <data android:scheme="http"/>
+  </intent>
+  <intent>
+    <action android:name="android.intent.action.VIEW"/>
+    <data android:scheme="https"/>
+  </intent>
+
+  <!-- Media players -->
+  <intent>
+    <action android:name="android.media.browse.MediaBrowserService"/>
+  </intent>
+  <intent>
+    <action android:name="android.intent.action.MEDIA_BUTTON"/>
+  </intent>
+
+  <!-- keep any specific apps you care about -->
+  <package android:name="com.foobar2000.foobar2000"/>
 </queries>
+
 
   <application
       android:label="PW-net — audio streamer"
@@ -57,6 +77,11 @@
        <action android:name="android.service.notification.NotificationListenerService"/>
      </intent-filter>
     </service>
+
+    <service
+    android:name=".MediaWatchService"
+     android:exported="false" />
+
 
   </application>
 </manifest>

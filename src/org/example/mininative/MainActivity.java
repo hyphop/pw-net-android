@@ -181,6 +181,8 @@ public class MainActivity extends Activity {
     prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
     Log.i(TAG, "created");
 
+    startService(new android.content.Intent(this, MediaWatchService.class));
+
     // just log the IPs on start
     for (String ip : getLocalWifiIPs(this)) {
         Log.i(TAG, "Local IP: " + ip);
@@ -462,17 +464,43 @@ private void addCandidate(final InetAddress host, final int port, final String[]
     Log.i(TAG, "mdns start()");
   }
 
+
+private final android.content.BroadcastReceiver mediaBr =
+    new android.content.BroadcastReceiver() {
+      @Override public void onReceive(android.content.Context c, android.content.Intent i) {
+        if (!MediaWatchService.ACT_MEDIA_LIST.equals(i.getAction())) return;
+
+        boolean nls = i.getBooleanExtra(MediaWatchService.EXTRA_NLS, false);
+        String[] pkgs = i.getStringArrayExtra(MediaWatchService.EXTRA_PKGS);
+        int[] uids    = i.getIntArrayExtra(MediaWatchService.EXTRA_UIDS);
+
+        if (!nls) {
+          Log.w(TAG, "NLS not enabled; can’t list media apps");
+          // show a small hint or button to open NLS settings if you want
+          return;
+        }
+
+        for (int k = 0; pkgs != null && uids != null && k < pkgs.length; k++) {
+          Log.i(TAG, "MEDIA: " + pkgs[k] + " uid=" + uids[k]);
+        }
+      }
+    };
+
+
   @Override protected void onResume() {
     super.onResume();
     Log.i(TAG, "resume");
     registerReceiver(br, new IntentFilter(ACT_STATE));
     setStateButtonFor(status);
+    registerReceiver(mediaBr, new android.content.IntentFilter(MediaWatchService.ACT_MEDIA_LIST));
+    startService(new Intent(this, MediaWatchService.class).setAction("REFRESH"));
   }
 
   @Override protected void onPause() {
     super.onPause();
     Log.i(TAG, "pause");
     try { unregisterReceiver(br); } catch (Throwable ignore) {}
+      try { unregisterReceiver(mediaBr); } catch (Throwable ignore) {}
   }
 
   @Override protected void onStop() {
@@ -488,6 +516,7 @@ private void addCandidate(final InetAddress host, final int port, final String[]
     super.onDestroy();
     try { if (mdns != null) mdns.stop(); } catch (Throwable ignore) {}
     Log.i(TAG, "onDestroy");
+    stopService(new Intent(this, MediaWatchService.class));
   }
 
   // ===== helpers =====
