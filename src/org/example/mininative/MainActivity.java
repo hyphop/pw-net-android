@@ -82,6 +82,25 @@ public class MainActivity extends Activity {
     Log.i(TAG, "update mdns " + c + "/" + mdnsEvents );
   }
 
+  private void updateMdnsLabel2Zero() {
+    if ( candidatesLayout != null ) {
+        candidatesLayout.removeAllViews();
+        mdnsEvents=0;
+        updateMdnsLabel();
+    }
+  }
+
+    private boolean hasItemWithText(LinearLayout layout, String text) {
+    for (int i = 0; i < layout.getChildCount(); i++) {
+        View v = layout.getChildAt(i);
+        if (v instanceof TextView) {
+            CharSequence existing = ((TextView) v).getText();
+            if (text.equals(existing)) return true;
+        }
+    }
+    return false;
+    }
+
   @Override protected void onCreate(Bundle b) {
     super.onCreate(b);
     prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
@@ -213,7 +232,18 @@ public class MainActivity extends Activity {
     // mDNS label + list (UNDER status)
     mdnsLabel = t("mDNS List [0/0]");
     mdnsLabel.setTextColor(YEL);
+    mdnsLabel.setClickable(true);
     mdnsLabel.setPadding(0, dp(12), 0, dp(4));
+
+    mdnsLabel.setOnClickListener(new View.OnClickListener() {
+    @Override
+    public void onClick(View v) {
+        // Do something on click, e.g. refresh list
+        Toast.makeText(MainActivity.this, "mDNS list cleared", Toast.LENGTH_SHORT).show();
+        updateMdnsLabel2Zero();
+    }
+    });
+
     root.addView(mdnsLabel);
 
     candidatesLayout = new LinearLayout(this);
@@ -267,8 +297,8 @@ private void addCandidate(final InetAddress host, final int port, final String[]
     if (candidatesLayout == null) return;
 
     // Default to host if no TXT or first TXT empty
-String displayTxt;
-if (txt != null && txt.length > 0) {
+    String displayTxt;
+    if (txt != null && txt.length > 0) {
     // join all TXT strings with spaces
     StringBuilder sb = new StringBuilder();
     for (int i = 0; i < txt.length; i++) {
@@ -278,15 +308,20 @@ if (txt != null && txt.length > 0) {
         }
     }
     displayTxt = sb.toString();
-} else {
-    displayTxt = ""; // no TXT records
-}
+    } else {
+        displayTxt = ""; // no TXT records
+    }
 
-// Always show IP:PORT, then optional TXT
-String line = host.getHostAddress() + ":" + port;
-if (!displayTxt.isEmpty()) {
-    line += " " + displayTxt;
-}
+    // Always show IP:PORT, then optional TXT
+    String line = host.getHostAddress() + ":" + port;
+    if (!displayTxt.isEmpty()) {
+        line += " " + displayTxt;
+    }
+
+    if (hasItemWithText(candidatesLayout, line)) {
+        return; // no need dub list
+    }
+
     TextView item = new TextView(this);
     item.setText(line);
     item.setTextColor(CYAN_DIM);
@@ -316,7 +351,7 @@ if (!displayTxt.isEmpty()) {
 
     mdnsEvents++;
     updateMdnsLabel();
-}
+  }
 
   @Override protected void onStart() {
     super.onStart();

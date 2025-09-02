@@ -113,17 +113,18 @@ public final class MdnsDiscoverer {
                 }
                 InetAddress host = (host4 != null) ? host4 : hostAny;
 
-                Log.i(TAG, "< " + info.getName() + "|" + info.getPort());
-
                 if (host == null) return;
 
+                /*
                 String key = info.getName() + "|" + info.getPort() + "|" + host.getHostAddress();
+                Log.i(TAG, "< " + key);
 
                 if (!seen.add(key)) {
                     // notify update (no TXT on dup to keep it lightweight)
-                    if (cb != null) cb.onService(host, info.getPort(), null);
+                     if (cb != null) cb.onService(host, info.getPort(), null);
                     return;
                 }
+                */
 
                 // === TXT in arrival order (raw RDATA parse) ===
                 String[] txt = parseTxtInOrder(info);
