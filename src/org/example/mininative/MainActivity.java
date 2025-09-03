@@ -304,9 +304,10 @@ public class MainActivity extends Activity {
         sendStop();
         Toast.makeText(MainActivity.this, "Exiting", Toast.LENGTH_SHORT).show();
         stopService(new Intent(MainActivity.this, StreamService.class));
-        stopService(new Intent(MainActivity.this, MediaWatchService.class));
-        if (android.os.Build.VERSION.SDK_INT >= 21) finishAndRemoveTask();
-        else finish();
+        //stopService(new Intent(MainActivity.this, MediaWatchService.class));
+        //if (android.os.Build.VERSION.SDK_INT >= 21)
+            finishAndRemoveTask();
+        //else finish();
       }
     });
     btns.addView(exitBtn, w());

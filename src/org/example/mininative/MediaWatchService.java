@@ -16,9 +16,12 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Log;
+import android.content.res.Configuration;
 
+import java.util.Locale;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.ArrayList;
@@ -44,49 +47,114 @@ public class MediaWatchService extends Service {
   private final Map<String, MediaController.Callback> callbacks = new HashMap<>();
   private final Map<String, Integer> lastStates = new HashMap<>();
 
+  private static void logf(String fmt, Object... args) {
+    Log.i(TAG,
+        String.format(Locale.US, "[%6d] ", SystemClock.elapsedRealtime() % 1_000_000)
+            + String.format(Locale.US, fmt, args));
+  }
+
   private final MediaSessionManager.OnActiveSessionsChangedListener sessionsCb =
       new MediaSessionManager.OnActiveSessionsChangedListener() {
         @Override public void onActiveSessionsChanged(List<MediaController> ctrls) {
+          logf("sessionsCb: activeSessionsChanged size=%d", (ctrls != null ? ctrls.size() : -1));
           reattachCallbacks(ctrls);
         }
       };
 
   @Override public void onCreate() {
     super.onCreate();
-    //startAsForeground();
+    logf("onCreate");
+
+    // Uncomment to keep service foreground (recommended on O+ if you want it long-lived)
+    startAsForeground();
 
     msm = (MediaSessionManager) getSystemService(Context.MEDIA_SESSION_SERVICE);
 
     if (!isNLSEnabled()) {
-      Log.w(TAG, "Notification listener NOT enabled (open settings to enable).");
+      logf("NLS NOT enabled (open settings to enable)");
       return;
     }
 
     try {
       msm.addOnActiveSessionsChangedListener(
           sessionsCb, new ComponentName(this, NLService.class), ui);
+      logf("registered sessionsCb");
       // initial attach + snapshot log
       reattachCallbacks(msm.getActiveSessions(new ComponentName(this, NLService.class)));
     } catch (SecurityException se) {
-      Log.w(TAG, "No permission for MediaSessionManager (enable notification access).");
+      logf("No permission for MSM (enable notification access)");
     }
   }
 
-  @Override public int onStartCommand(Intent i, int flags, int id) {
+  @Override public int onStartCommand(Intent i, int flags, int startId) {
+    logf("onStartCommand action=%s flags=%d startId=%d",
+        (i != null ? i.getAction() : "<null>"), flags, startId);
     // nothing special; keep running
     return START_STICKY;
   }
 
-  @Override public void onDestroy() {
-    super.onDestroy();
-    try { msm.removeOnActiveSessionsChangedListener(sessionsCb); } catch (Throwable ignore) {}
-    for (String pkg : new ArrayList<>(attached.keySet())) {
-      try { attached.get(pkg).unregisterCallback(callbacks.get(pkg)); } catch (Throwable ignore) {}
-    }
-    attached.clear(); callbacks.clear();
+  @Override public void onTaskRemoved(Intent rootIntent) {
+    super.onTaskRemoved(rootIntent);
+    logf("onTaskRemoved rootIntent=%s", String.valueOf(rootIntent));
+    // stopSelf(); // optional
   }
 
-  @Override public IBinder onBind(Intent intent) { return null; }
+  @Override public void onDestroy() {
+    logf("onDestroy begin");
+    try {
+      if (msm != null) {
+        msm.removeOnActiveSessionsChangedListener(sessionsCb);
+        logf("unregistered sessionsCb");
+      }
+    } catch (Throwable ignore) {}
+
+    for (String pkg : new ArrayList<>(attached.keySet())) {
+      try {
+        MediaController mc = attached.get(pkg);
+        MediaController.Callback cb = callbacks.get(pkg);
+        if (mc != null && cb != null) {
+          mc.unregisterCallback(cb);
+          logf("unregister cb pkg=%s", pkg);
+        }
+      } catch (Throwable ignore) {}
+    }
+    attached.clear();
+    callbacks.clear();
+
+    stopForeground(true); // if you used startAsForeground()
+    logf("onDestroy end");
+    super.onDestroy();
+  }
+
+  @Override public void onConfigurationChanged(Configuration newConfig) {
+    super.onConfigurationChanged(newConfig);
+    logf("onConfigurationChanged %s", newConfig.toString());
+  }
+
+  @Override public void onLowMemory() {
+    super.onLowMemory();
+    logf("onLowMemory");
+  }
+
+  @Override public void onTrimMemory(int level) {
+    super.onTrimMemory(level);
+    logf("onTrimMemory level=%d", level);
+  }
+
+  @Override public boolean onUnbind(Intent intent) {
+    logf("onUnbind intent=%s", String.valueOf(intent));
+    return super.onUnbind(intent);
+  }
+
+  @Override public void onRebind(Intent intent) {
+    super.onRebind(intent);
+    logf("onRebind intent=%s", String.valueOf(intent));
+  }
+
+  @Override public IBinder onBind(Intent intent) {
+  logf("onBind requested intent=%s", String.valueOf(intent));
+  return null; // still a started-only service (no binding)
+  }
 
   // ===== internals =====
 
@@ -143,7 +211,8 @@ public class MediaWatchService extends Service {
 
   // Attach callbacks to current controllers; log initial states; handle PAUSE reliably.
   private void reattachCallbacks(List<MediaController> ctrls) {
-    if (ctrls == null) return;
+    if (ctrls == null) { logf("reattachCallbacks: ctrls=null"); return; }
+    logf("reattachCallbacks: ctrls=%d", ctrls.size());
 
     // Build new set of packages present
     Set<String> present = new HashSet<>();
@@ -154,15 +223,21 @@ public class MediaWatchService extends Service {
     // Detach removed
     for (String pkg : new ArrayList<>(attached.keySet())) {
       if (!present.contains(pkg)) {
-        try { attached.get(pkg).unregisterCallback(callbacks.get(pkg)); } catch (Throwable ignore) {}
+        try {
+          MediaController mc = attached.get(pkg);
+          MediaController.Callback cb = callbacks.get(pkg);
+          if (mc != null && cb != null) mc.unregisterCallback(cb);
+        } catch (Throwable ignore) {}
         attached.remove(pkg);
         callbacks.remove(pkg);
         // Treat disappearance as NONE (optional; handy for logs)
         Integer oldS = lastStates.containsKey(pkg) ? lastStates.get(pkg) : STATE_NONE;
         if (oldS != STATE_NONE) {
           int uid = resolveUid(pkg);
-          Log.i(TAG, "state: " + pkg + " uid=" + uid + " " + stateName(oldS) + " -> " + stateName(STATE_NONE));
+          logf("detach: %s uid=%d %s -> %s", pkg, uid, stateName(oldS), stateName(STATE_NONE));
           lastStates.put(pkg, STATE_NONE);
+        } else {
+          logf("detach: %s (no previous state)", pkg);
         }
       }
     }
@@ -171,14 +246,15 @@ public class MediaWatchService extends Service {
     for (MediaController mc : ctrls) {
       final String pkg = mc.getPackageName();
       if (!attached.containsKey(pkg)) {
+        logf("attach: %s", pkg);
         MediaController.Callback cb = new MediaController.Callback() {
           @Override public void onPlaybackStateChanged(PlaybackState st) {
             int s = (st != null) ? st.getState() : STATE_NONE;
-            Integer prev = lastStates.containsKey(pkg) ? lastStates.get(pkg) : STATE_NONE;
+            Integer prev = (lastStates.containsKey(pkg) ? lastStates.get(pkg) : STATE_NONE);
             if (prev == null) prev = STATE_NONE;
-            if (prev != s) {
+            if (!prev.equals(s)) {
               int uid = resolveUid(pkg);
-              Log.i(TAG, "state: " + pkg + " uid=" + uid + " " + stateName(prev) + " -> " + stateName(s));
+              logf("state: %s uid=%d %s -> %s", pkg, uid, stateName(prev), stateName(s));
               lastStates.put(pkg, s);
             }
           }
@@ -190,12 +266,14 @@ public class MediaWatchService extends Service {
         // Log initial snapshot for this controller
         PlaybackState st = mc.getPlaybackState();
         int s = (st != null) ? st.getState() : STATE_NONE;
-        Integer prev = lastStates.containsKey(pkg) ? lastStates.get(pkg) : STATE_NONE;
+        Integer prev = (lastStates.containsKey(pkg) ? lastStates.get(pkg) : STATE_NONE);
         if (prev == null) prev = STATE_NONE;
-        if (prev != s) {
+        if (!prev.equals(s)) {
           int uid = resolveUid(pkg);
-          Log.i(TAG, "state: " + pkg + " uid=" + uid + " " + stateName(prev) + " -> " + stateName(s));
+          logf("initial: %s uid=%d %s -> %s", pkg, uid, stateName(prev), stateName(s));
           lastStates.put(pkg, s);
+        } else {
+          logf("initial: %s already %s", pkg, stateName(s));
         }
       }
     }
