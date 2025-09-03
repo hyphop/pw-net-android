@@ -181,12 +181,15 @@ public class MainActivity extends Activity {
     prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
     Log.i(TAG, "created");
 
+/*
+   */
     Intent mw = new Intent(this, MediaWatchService.class);
     if (Build.VERSION.SDK_INT >= 26) {
     startForegroundService(mw);
     } else {
     startService(mw);
     }
+/* */
 
     // just log the IPs on start
     for (String ip : getLocalWifiIPs(this)) {

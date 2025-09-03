@@ -37,7 +37,9 @@ import static android.media.session.PlaybackState.STATE_STOPPED;
 
 public class MediaWatchService extends Service {
   private static final String TAG = "MediaWatch";
-  private static final String CH_ID = "mediawatch_logger";
+  private static final String SRV = "Media Watcher";
+  private static final String CH_ID = "pwnet";
+  public static final String ACT_STOP = "org.example.mininative.MEDIAWATCH_STOP";
 
   private final Handler ui = new Handler(Looper.getMainLooper());
   private MediaSessionManager msm;
@@ -86,12 +88,17 @@ public class MediaWatchService extends Service {
     }
   }
 
-  @Override public int onStartCommand(Intent i, int flags, int startId) {
-    logf("onStartCommand action=%s flags=%d startId=%d",
-        (i != null ? i.getAction() : "<null>"), flags, startId);
-    // nothing special; keep running
-    return START_STICKY;
+@Override public int onStartCommand(Intent i, int flags, int startId) {
+  logf("onStartCommand action=%s flags=%d startId=%d", (i!=null?i.getAction():"<null>"), flags, startId);
+  if (i != null && ACT_STOP.equals(i.getAction())) {
+    stopForeground(true);
+    stopSelf();
+    return START_NOT_STICKY;
   }
+  // keep running
+  if (Build.VERSION.SDK_INT >= 26) startAsForeground(); // safe to call again; no-op if already foreground
+  return START_STICKY;
+}
 
   @Override public void onTaskRemoved(Intent rootIntent) {
     super.onTaskRemoved(rootIntent);
@@ -161,18 +168,18 @@ public class MediaWatchService extends Service {
   private void startAsForeground() {
     NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
     if (Build.VERSION.SDK_INT >= 26) {
-      NotificationChannel ch = new NotificationChannel(CH_ID, "Media Watch Logger",
+      NotificationChannel ch = new NotificationChannel(CH_ID, SRV,
           NotificationManager.IMPORTANCE_MIN);
       nm.createNotificationChannel(ch);
       Notification n = new Notification.Builder(this, CH_ID)
           .setSmallIcon(android.R.drawable.ic_media_play)
-          .setContentTitle("Media session logger running")
+          .setContentTitle(SRV + " running")
           .build();
       startForeground(1, n);
     } else {
       Notification n = new Notification.Builder(this)
           .setSmallIcon(android.R.drawable.ic_media_play)
-          .setContentTitle("Media session logger running")
+          .setContentTitle(SRV + " running")
           .build();
       startForeground(1, n);
     }
