@@ -34,10 +34,7 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
   private MdnsDiscoverer mdns;
-  private LinearLayout candidatesLayout;
-  private TextView mdnsLabel;
   private int mdnsEvents = 0;
-
 
   private static final String TAG = "MainActivity";
   private static final String PREFS="mn_prefs";
@@ -67,8 +64,13 @@ public class MainActivity extends Activity {
   private String status = "DISCONNECTED";
   private boolean muted = false;
 
+private LinearLayout candidatesLayout;   // mDNS list (already have)
+private LinearLayout audioLayout;        // Audio sources list
+private android.widget.FrameLayout switcher;
+private TextView mdnsLabel, audioLabel;  // from previous row
+private int currentTab = -1;
 
-  private static java.util.List<String> getLocalWifiIPs(Context ctx) {
+private static java.util.List<String> getLocalWifiIPs(Context ctx) {
     String ipv4 = null, ipv6 = null;
 
     // Prefer active Wi-Fi network (API 21+)
@@ -176,20 +178,21 @@ public class MainActivity extends Activity {
     return false;
     }
 
+    private void showTab(int which) { // 0 = mDNS, 1 = Audio
+    if (which == currentTab) return;  // no-op if already active
+        currentTab = which;
+
+    candidatesLayout.setVisibility(which == 0 ? View.VISIBLE : View.GONE);
+    audioLayout.setVisibility(which == 1 ? View.VISIBLE : View.GONE);
+    // active = yellow, inactive = white
+    if (mdnsLabel != null) mdnsLabel.setTextColor(which == 0 ? YEL : WHITE);
+    if (audioLabel != null) audioLabel.setTextColor(which == 1 ? YEL : WHITE);
+    }
+
   @Override protected void onCreate(Bundle b) {
     super.onCreate(b);
     prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
     Log.i(TAG, "created");
-
-/*
-   * /
-    Intent mw = new Intent(this, MediaWatchService.class);
-    if (Build.VERSION.SDK_INT >= 26) {
-    startForegroundService(mw);
-    } else {
-    startService(mw);
-    }
-/* */
 
     // just log the IPs on start
     for (String ip : getLocalWifiIPs(this)) {
@@ -305,10 +308,7 @@ public class MainActivity extends Activity {
         sendStop();
         Toast.makeText(MainActivity.this, "Exiting", Toast.LENGTH_SHORT).show();
         stopService(new Intent(MainActivity.this, StreamService.class));
-        //stopService(new Intent(MainActivity.this, MediaWatchService.class));
-        //if (android.os.Build.VERSION.SDK_INT >= 21)
-            finishAndRemoveTask();
-        //else finish();
+        finishAndRemoveTask();
       }
     });
     btns.addView(exitBtn, w());
@@ -338,27 +338,90 @@ topTv.setOnClickListener(new View.OnClickListener() {
     botTv = t("Disconnected");
     root.addView(botTv);
 
-    // mDNS label + list (UNDER status)
-    mdnsLabel = t("mDNS List [0/0]");
-    mdnsLabel.setTextColor(YEL);
-    mdnsLabel.setClickable(true);
-    mdnsLabel.setPadding(0, dp(12), 0, dp(4));
+// One horizontal row
+LinearLayout row = new LinearLayout(this);
+row.setOrientation(LinearLayout.HORIZONTAL);
+row.setLayoutParams(new LinearLayout.LayoutParams(
+    LinearLayout.LayoutParams.MATCH_PARENT,
+    LinearLayout.LayoutParams.WRAP_CONTENT));
+row.setPadding(0, dp(12), 0, dp(4));
+row.setGravity(Gravity.CENTER_VERTICAL);
 
-    mdnsLabel.setOnClickListener(new View.OnClickListener() {
-    @Override
-    public void onClick(View v) {
-        // Do something on click, e.g. refresh list
-        Toast.makeText(MainActivity.this, "mDNS list cleared", Toast.LENGTH_SHORT).show();
-        updateMdnsLabel2Zero();
-    }
-    });
+// Left: mDNS label, weight=1 to push right label to edge
+mdnsLabel = t("mDNS List [0/0]");
+mdnsLabel.setClickable(true);
+LinearLayout.LayoutParams leftLp = new LinearLayout.LayoutParams(
+    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+mdnsLabel.setLayoutParams(leftLp);
+mdnsLabel.setOnClickListener(new View.OnClickListener() {
+  @Override public void onClick(View v) {
+    Toast.makeText(MainActivity.this, "mDNS list cleared", Toast.LENGTH_SHORT).show();
+    updateMdnsLabel2Zero();
+  }
+});
 
-    root.addView(mdnsLabel);
+// Right: Audio Source (right-aligned naturally)
+audioLabel = t("Audio Source [0/0]");
+audioLabel.setClickable(true);
+LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(
+    LinearLayout.LayoutParams.WRAP_CONTENT,
+    LinearLayout.LayoutParams.WRAP_CONTENT);
+audioLabel.setLayoutParams(rightLp);
+audioLabel.setOnClickListener(new View.OnClickListener() {
+  @Override public void onClick(View v) {
+    Toast.makeText(MainActivity.this, "Audio sources refreshed", Toast.LENGTH_SHORT).show();
+    // refreshAudioSources(); // your call here
+  }
+});
 
-    candidatesLayout = new LinearLayout(this);
-    candidatesLayout.setOrientation(LinearLayout.VERTICAL);
-    candidatesLayout.setPadding(0, dp(4), 0, 0);
-    root.addView(candidatesLayout);
+// Add to layout
+row.addView(mdnsLabel);
+row.addView(audioLabel);
+root.addView(row);
+
+// === after you create the row with mdnsLabel + audioLabel ===
+
+// Switcher that stacks the two lists
+switcher = new android.widget.FrameLayout(this);
+switcher.setLayoutParams(new LinearLayout.LayoutParams(
+    LinearLayout.LayoutParams.MATCH_PARENT,
+    LinearLayout.LayoutParams.WRAP_CONTENT));
+root.addView(switcher);
+
+// Left pane: mDNS candidates
+candidatesLayout = new LinearLayout(this);
+candidatesLayout.setOrientation(LinearLayout.VERTICAL);
+candidatesLayout.setPadding(0, dp(4), 0, 0);
+switcher.addView(candidatesLayout);
+
+// Right pane: Audio sources list (start hidden)
+audioLayout = new LinearLayout(this);
+audioLayout.setOrientation(LinearLayout.VERTICAL);
+audioLayout.setPadding(0, dp(4), 0, 0);
+audioLayout.setVisibility(View.GONE);
+switcher.addView(audioLayout);
+
+// Clicks to switch panes (no lambdas)
+mdnsLabel.setOnClickListener(new View.OnClickListener() {
+  @Override public void onClick(View v) { showTab(0); }
+});
+audioLabel.setOnClickListener(new View.OnClickListener() {
+  @Override public void onClick(View v) { showTab(1); }
+});
+
+// (Optional) keep your old "clear mDNS" on long-press
+mdnsLabel.setOnLongClickListener(new View.OnLongClickListener() {
+  @Override public boolean onLongClick(View v) {
+    Toast.makeText(MainActivity.this, "mDNS list cleared", Toast.LENGTH_SHORT).show();
+    updateMdnsLabel2Zero();
+    // also clear UI list if you want:
+    // candidatesLayout.removeAllViews();
+    return true;
+  }
+});
+
+// default view
+showTab(0);
 
     // Gain live updates
     gainSb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -377,6 +440,7 @@ topTv.setOnClickListener(new View.OnClickListener() {
     });
 
     setContentView(root);
+
   }
 
   private void mdns_setup() {

@@ -72,16 +72,11 @@
     android:name=".NLService"
     android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
     android:exported="false"
-    android:label="MiniNativeStream Listener">
+    android:label="PW-net media-watcher">
      <intent-filter>
        <action android:name="android.service.notification.NotificationListenerService"/>
      </intent-filter>
     </service>
-
-    <service
-    android:name=".MediaWatchService"
-     android:exported="false" />
-
 
   </application>
 </manifest>
