@@ -182,7 +182,7 @@ public class MainActivity extends Activity {
     Log.i(TAG, "created");
 
 /*
-   */
+   * /
     Intent mw = new Intent(this, MediaWatchService.class);
     if (Build.VERSION.SDK_INT >= 26) {
     startForegroundService(mw);
@@ -206,7 +206,6 @@ public class MainActivity extends Activity {
     // Host field
     hostEt = new EditText(this);
     hostEt.setHint("host");
-    hostEt.setSingleLine(true);
     hostEt.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
     hostEt.setText(prefs.getString(KEY_HOST, Config.HOST));
     styleEdit(hostEt);
@@ -222,7 +221,6 @@ public class MainActivity extends Activity {
     // Port field
     portEt = new EditText(this);
     portEt.setHint("port");
-    portEt.setSingleLine(true);
     portEt.setInputType(InputType.TYPE_CLASS_NUMBER);
     portEt.setFilters(new InputFilter[]{ new InputFilter.LengthFilter(5) });
     portEt.setText(String.valueOf(prefs.getInt(KEY_PORT, Config.PORT)));
@@ -518,7 +516,8 @@ private void addCandidate(final InetAddress host, final int port, final String[]
     e.setHintTextColor(CYAN_DIM);
     e.setSingleLine(true);
     e.setEllipsize(TextUtils.TruncateAt.END);
-    try { e.setBackgroundResource(R.drawable.mn_clickable); } catch (Throwable ignore) {}
+    e.setBackground(makeBg(BG, CYAN));
+    e.setPadding(dp(12),dp(12),dp(12),dp(12));
   }
   private void styleSeek(SeekBar s){
     if (Build.VERSION.SDK_INT >= 21) {
@@ -543,7 +542,8 @@ private void addCandidate(final InetAddress host, final int port, final String[]
     b.setSingleLine(true);
     b.setEllipsize(TextUtils.TruncateAt.END);
     b.setTextColor(CYAN);
-    try { b.setBackgroundResource(R.drawable.mn_clickable); } catch (Throwable ignore) {}
+    b.setBackground(makeBg(BG, CYAN));
+    ///try { b.setBackgroundResource(R.drawable.mn_clickable); } catch (Throwable ignore) {}
     return b;
   }
   private Button filledButton(String label, int fill, int stroke){

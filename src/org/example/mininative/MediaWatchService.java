@@ -35,9 +35,11 @@ import static android.media.session.PlaybackState.STATE_BUFFERING;
 import static android.media.session.PlaybackState.STATE_PAUSED;
 import static android.media.session.PlaybackState.STATE_STOPPED;
 
+import android.app.PendingIntent;
+
 public class MediaWatchService extends Service {
   private static final String TAG = "MediaWatch";
-  private static final String SRV = "Media Watcher";
+  private static final String SRV = "PW-net media-watcher";
   private static final String CH_ID = "pwnet";
   public static final String ACT_STOP = "org.example.mininative.MEDIAWATCH_STOP";
 
@@ -165,25 +167,43 @@ public class MediaWatchService extends Service {
 
   // ===== internals =====
 
-  private void startAsForeground() {
-    NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-    if (Build.VERSION.SDK_INT >= 26) {
-      NotificationChannel ch = new NotificationChannel(CH_ID, SRV,
-          NotificationManager.IMPORTANCE_MIN);
+private void startAsForeground() {
+  NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+
+  if (Build.VERSION.SDK_INT >= 26) {
+    NotificationChannel ch = nm.getNotificationChannel(CH_ID);
+    if (ch == null || ch.getImportance() != NotificationManager.IMPORTANCE_LOW) {
+      if (ch != null) nm.deleteNotificationChannel(CH_ID); // recreate at LOW so tap works
+      ch = new NotificationChannel(CH_ID, SRV, NotificationManager.IMPORTANCE_LOW);
+      ch.setShowBadge(false);
       nm.createNotificationChannel(ch);
-      Notification n = new Notification.Builder(this, CH_ID)
-          .setSmallIcon(android.R.drawable.ic_media_play)
-          .setContentTitle(SRV + " running")
-          .build();
-      startForeground(1, n);
-    } else {
-      Notification n = new Notification.Builder(this)
-          .setSmallIcon(android.R.drawable.ic_media_play)
-          .setContentTitle(SRV + " running")
-          .build();
-      startForeground(1, n);
     }
   }
+
+  PendingIntent openPI = PendingIntent.getActivity(
+      this, 0,
+      new Intent(this, MainActivity.class)
+          .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP),
+      (Build.VERSION.SDK_INT >= 23)
+          ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT)
+          : 0
+  );
+
+  Notification.Builder nb = (Build.VERSION.SDK_INT >= 26)
+      ? new Notification.Builder(this, CH_ID)
+      : new Notification.Builder(this);
+
+  Notification n = nb
+      .setContentTitle(SRV + " running")
+      //.setSmallIcon(R.drawable.ic_stat_pwnet) // your glyph
+      .setContentIntent(openPI)               // tap -> MainActivity
+      .setOngoing(true)
+      .setOnlyAlertOnce(true)
+      .setShowWhen(false)
+      .build();
+
+  startForeground(1, n);
+}
 
   private boolean isNLSEnabled() {
     String flat = Settings.Secure.getString(getContentResolver(),

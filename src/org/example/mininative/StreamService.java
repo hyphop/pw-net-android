@@ -137,6 +137,13 @@ public class StreamService extends Service implements Runnable {
     muted = prefs.getBoolean(KEY_MUTED, false);
 
     ensureChannel();
+
+    // make sure no stale notifications from our app are confusing what you see
+    try {
+      NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+      nm.cancelAll();
+    } catch (Throwable ignore) {}
+
     startForeground(NID, buildNotif("CONNECTING"));
 
     if (th == null || !running) {
@@ -165,31 +172,23 @@ public class StreamService extends Service implements Runnable {
     return bmp;
   }
 
-  private int smallIconRes() {
-    int id = 0;
-    try {
-      id = getResources().getIdentifier("ic_stat_pwnet", "drawable", getPackageName());
-    } catch (Throwable ignore) {}
-    Log.i(TAG, "small icon " + id);
+private int smallIconRes() {
+  int id = 0;
+  try {
+    id = getResources().getIdentifier("ic_stat_pwnet", "drawable", getPackageName());
+  } catch (Throwable ignore) {}
 
-    if (id != 0) return id;
-
-    id = android.R.drawable.ic_media_play; // fallback if your drawable is missing
-    Log.i(TAG, "small icon safe " + id);
-
+  if (id != 0) {
+    try { Log.i(TAG, "small icon id=" + id + " name=" + getResources().getResourceName(id)); }
+    catch (android.content.res.Resources.NotFoundException ignore) {}
     return id;
   }
-  /*
-    private void ensureChannel() {
-      if (Build.VERSION.SDK_INT >= 26) {
-        NotificationChannel ch = new NotificationChannel(CH, "PW-net streamer",
-    NotificationManager.IMPORTANCE_DEFAULT); ch.setDescription("PW-net audio streamer");
-              ch.setShowBadge(false);
-        ((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(ch);
-      }
-    }
 
-  */
+  int fb = android.R.drawable.ic_media_play; // fallback
+  try { Log.i(TAG, "small icon fallback id=" + fb + " name=" + getResources().getResourceName(fb)); }
+  catch (android.content.res.Resources.NotFoundException ignore) {}
+  return fb;
+}
 
   private void ensureChannel() {
     if (Build.VERSION.SDK_INT >= 26) {
@@ -197,7 +196,10 @@ public class StreamService extends Service implements Runnable {
           (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
       if (nm.getNotificationChannel(CH) == null) {
         NotificationChannel ch = new NotificationChannel(
-            CH, "PW-net streamer", NotificationManager.IMPORTANCE_DEFAULT);
+            CH, "PW-net streamer",
+            //NotificationManager.IMPORTANCE_DEFAULT
+            NotificationManager.IMPORTANCE_LOW
+            );
         ch.setDescription("PW-net audio streamer");
         ch.setShowBadge(false);
         nm.createNotificationChannel(ch);
@@ -230,9 +232,13 @@ public class StreamService extends Service implements Runnable {
         host + ":" + port + " " + statusDot(status) + " " + status.toLowerCase();
     return nb.setContentTitle("PW-net audio streamer")
         .setContentText(line)
-        //.setSmallIcon(smallIconRes())
-        .setSmallIcon(R.drawable.ic_stat_pwnet)
-        .setLargeIcon(bitmapFromDrawable(R.drawable.ic_stat_pwnet, 48))
+        //.setSubText("StreamService")
+        .setSmallIcon(smallIconRes())
+        //.setSmallIcon(R.drawable.ic_stat_pwnet)
+//        .setLargeIcon(bitmapFromDrawable(
+//                    //R.drawable.ic_stat_pwnet
+//                    R.mipmap.ic_launcher
+//                    , 48))
         .setOnlyAlertOnce(true)
         .setShowWhen(false)
         .setContentIntent(openPI)
