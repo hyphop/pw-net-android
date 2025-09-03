@@ -32,6 +32,8 @@ import java.net.Inet6Address;
 import java.util.Enumeration;
 import java.util.Locale;
 
+import android.content.ComponentName;
+
 public class MainActivity extends Activity {
   private MdnsDiscoverer mdns;
   private int mdnsEvents = 0;
@@ -69,6 +71,36 @@ private LinearLayout audioLayout;        // Audio sources list
 private android.widget.FrameLayout switcher;
 private TextView mdnsLabel, audioLabel;  // from previous row
 private int currentTab = -1;
+
+// === NLService hooks ===
+private android.content.BroadcastReceiver sourcesRx;
+
+private boolean isNLSEnabled() {
+  String flat = android.provider.Settings.Secure.getString(
+      getContentResolver(), "enabled_notification_listeners");
+  return flat != null &&
+         flat.contains(new ComponentName(this, NLService.class).flattenToString());
+}
+
+private void openNLSSettings() {
+  try {
+    startActivity(new Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+  } catch (Exception e) {
+    startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS));
+  }
+}
+
+// Call this when user taps "Audio Source"
+private void onAudioSourceClick() {
+  if (!isNLSEnabled()) {
+    android.widget.Toast.makeText(this, "Enable PW-net in Notification Access", android.widget.Toast.LENGTH_LONG).show();
+    openNLSSettings();
+    return;
+  }
+  // Ask NLService for a snapshot
+  Log.i(TAG, "onClick audio Source");
+  //sendBroadcast(new Intent(NLService.ACT_ASK_SOURCES).setPackage(getPackageName()));
+}
 
 private static java.util.List<String> getLocalWifiIPs(Context ctx) {
     String ipv4 = null, ipv6 = null;
@@ -367,12 +399,6 @@ LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(
     LinearLayout.LayoutParams.WRAP_CONTENT,
     LinearLayout.LayoutParams.WRAP_CONTENT);
 audioLabel.setLayoutParams(rightLp);
-audioLabel.setOnClickListener(new View.OnClickListener() {
-  @Override public void onClick(View v) {
-    Toast.makeText(MainActivity.this, "Audio sources refreshed", Toast.LENGTH_SHORT).show();
-    // refreshAudioSources(); // your call here
-  }
-});
 
 // Add to layout
 row.addView(mdnsLabel);
@@ -405,8 +431,12 @@ switcher.addView(audioLayout);
 mdnsLabel.setOnClickListener(new View.OnClickListener() {
   @Override public void onClick(View v) { showTab(0); }
 });
+
 audioLabel.setOnClickListener(new View.OnClickListener() {
-  @Override public void onClick(View v) { showTab(1); }
+  @Override public void onClick(View v) {
+    showTab(1);
+    onAudioSourceClick();
+  }
 });
 
 // (Optional) keep your old "clear mDNS" on long-press
