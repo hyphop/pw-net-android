@@ -92,14 +92,24 @@ private void openNLSSettings() {
 
 // Call this when user taps "Audio Source"
 private void onAudioSourceClick() {
-  if (!isNLSEnabled()) {
+
+    if (!isNLSEnabled()) {
     android.widget.Toast.makeText(this, "Enable PW-net in Notification Access", android.widget.Toast.LENGTH_LONG).show();
     openNLSSettings();
     return;
   }
+
+  // Nudge the system to (re)bind the listener, then ask for a snapshot
+  try {
+    if (android.os.Build.VERSION.SDK_INT >= 24) {
+      android.service.notification.NotificationListenerService.requestRebind(
+          new ComponentName(this, NLService.class));
+    }
+  } catch (Throwable ignore) {}
+
   // Ask NLService for a snapshot
   Log.i(TAG, "onClick audio Source");
-  //sendBroadcast(new Intent(NLService.ACT_ASK_SOURCES).setPackage(getPackageName()));
+  sendBroadcast(new Intent(NLService.ACT_ASK_SOURCES).setPackage(getPackageName()));
 }
 
 private static java.util.List<String> getLocalWifiIPs(Context ctx) {

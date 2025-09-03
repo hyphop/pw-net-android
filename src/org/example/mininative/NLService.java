@@ -34,12 +34,18 @@ public class NLService extends NotificationListenerService {
 
   private static final String TAG = "MediaWatch";
 
-  // session snapshot
-  private final Map<String, SourceInfo> sources = new HashMap<>();
+  // session snapshot (pkg -> info)
+  private final Map<String, SourceInfo> sources = new HashMap<String, SourceInfo>();
+
+  // track attached controllers + callbacks + last states (to catch PLAYING/PAUSED changes)
+  private final Map<String, MediaController> attached = new HashMap<String, MediaController>();
+  private final Map<String, MediaController.Callback> callbacks = new HashMap<String, MediaController.Callback>();
+  private final Map<String, Integer> lastStates = new HashMap<String, Integer>();
 
   private MediaSessionManager msm;
   private Handler ui;
   private BroadcastReceiver askRx;
+  private boolean sessionsCbRegistered = false;
 
   private static void logf(String fmt, Object... args) {
     Log.i(TAG,
@@ -63,6 +69,7 @@ public class NLService extends NotificationListenerService {
       }
     };
     registerReceiver(askRx, new IntentFilter(ACT_ASK_SOURCES));
+
     logf("onCreate");
     // take initial snapshot (will work only if user granted Notification Access)
     safeSnapshotActiveSessions();
@@ -72,10 +79,26 @@ public class NLService extends NotificationListenerService {
 
   @Override public void onDestroy() {
     try { unregisterReceiver(askRx); } catch (Throwable ignore) {}
-    try { if (msm != null && sessionsCbRegistered) {
-            msm.removeOnActiveSessionsChangedListener(sessionsCb);
-          }
+    try {
+      if (msm != null && sessionsCbRegistered) {
+        msm.removeOnActiveSessionsChangedListener(sessionsCb);
+      }
     } catch (Throwable ignore) {}
+
+    // Detach all controller callbacks
+    try {
+      for (String pkg : new ArrayList<String>(attached.keySet())) {
+        MediaController mc = attached.get(pkg);
+        MediaController.Callback cb = callbacks.get(pkg);
+        if (mc != null && cb != null) {
+          try { mc.unregisterCallback(cb); } catch (Throwable ignore) {}
+        }
+      }
+      attached.clear();
+      callbacks.clear();
+      lastStates.clear();
+    } catch (Throwable ignore) {}
+
     logf("onDestroy");
     super.onDestroy();
   }
@@ -93,7 +116,7 @@ public class NLService extends NotificationListenerService {
   }
 
   @Override public void onNotificationPosted(StatusBarNotification sbn) {
-    // Logs all posted notifications (not only media). Helpful for debugging.
+    // Keep for debugging; reads title via extras (you can trim if too noisy)
     try {
       String pkg = sbn.getPackageName();
       int uid = safeUidForPackage(pkg);
@@ -134,8 +157,6 @@ public class NLService extends NotificationListenerService {
         }
       };
 
-  private boolean sessionsCbRegistered = false;
-
   private void safeRegisterSessionsListener() {
     try {
       if (msm != null && !sessionsCbRegistered) {
@@ -163,52 +184,124 @@ public class NLService extends NotificationListenerService {
     }
   }
 
+  // Attach callbacks to controllers, update SourceInfo on every state change (incl. PAUSED).
   private void rebuildSources(List<MediaController> ctrls) {
-    // track present pkgs
-    Set<String> present = new HashSet<>();
+    // Build set of present packages
+    Set<String> present = new HashSet<String>();
     if (ctrls != null) {
       for (MediaController mc : ctrls) {
-        String pkg = mc.getPackageName();
+        final String pkg = mc.getPackageName();
         present.add(pkg);
-        PlaybackState st = null;
-        try { st = mc.getPlaybackState(); } catch (Throwable ignore) {}
-        int state = (st != null ? st.getState() : PlaybackState.STATE_NONE);
 
-        SourceInfo si = sources.get(pkg);
-        if (si == null) si = new SourceInfo();
-        si.pkg = pkg;
-        si.uid = safeUidForPackage(pkg);
-        si.label = safeAppLabel(pkg);
-        si.state = state;
-        si.tMs = SystemClock.elapsedRealtime();
-        sources.put(pkg, si);
+        // Attach callback once per package
+        if (!attached.containsKey(pkg)) {
+          MediaController.Callback cb = new MediaController.Callback() {
+            @Override public void onPlaybackStateChanged(PlaybackState st) {
+              int s = (st != null ? st.getState() : PlaybackState.STATE_NONE);
 
-        logf("source: %s uid=%d state=%s", pkg, si.uid, stateName(state));
+              // Update snapshot
+              SourceInfo si = sources.get(pkg);
+              if (si == null) si = new SourceInfo();
+              si.pkg   = pkg;
+              si.uid   = safeUidForPackage(pkg);
+              si.label = safeAppLabel(pkg);
+              si.state = s;
+              si.tMs   = SystemClock.elapsedRealtime();
+              sources.put(pkg, si);
+
+              // Log only on change
+              Integer prevI = lastStates.get(pkg);
+              int prev = (prevI != null ? prevI.intValue() : PlaybackState.STATE_NONE);
+              if (prev != s) {
+                logf("state: %s uid=%d %s -> %s", pkg, si.uid, stateName(prev), stateName(s));
+                lastStates.put(pkg, Integer.valueOf(s));
+              }
+            }
+          };
+          try { mc.registerCallback(cb, ui); } catch (Throwable ignore) {}
+          attached.put(pkg, mc);
+          callbacks.put(pkg, cb);
+
+          // Initial snapshot/log without waiting for callback
+          PlaybackState st = null;
+          try { st = mc.getPlaybackState(); } catch (Throwable ignore) {}
+          int s0 = (st != null ? st.getState() : PlaybackState.STATE_NONE);
+
+          SourceInfo si0 = sources.get(pkg);
+          if (si0 == null) si0 = new SourceInfo();
+          si0.pkg   = pkg;
+          si0.uid   = safeUidForPackage(pkg);
+          si0.label = safeAppLabel(pkg);
+          si0.state = s0;
+          si0.tMs   = SystemClock.elapsedRealtime();
+          sources.put(pkg, si0);
+
+          Integer prevI = lastStates.get(pkg);
+          int prev = (prevI != null ? prevI.intValue() : PlaybackState.STATE_NONE);
+          if (prev != s0) {
+            logf("initial: %s uid=%d %s -> %s", pkg, si0.uid, stateName(prev), stateName(s0));
+            lastStates.put(pkg, Integer.valueOf(s0));
+          } else {
+            logf("initial: %s already %s", pkg, stateName(s0));
+          }
+        } else {
+          // Already attached; refresh current state into snapshot
+          PlaybackState st = null;
+          try { st = mc.getPlaybackState(); } catch (Throwable ignore) {}
+          int s = (st != null ? st.getState() : PlaybackState.STATE_NONE);
+
+          SourceInfo si = sources.get(pkg);
+          if (si == null) si = new SourceInfo();
+          si.pkg   = pkg;
+          si.uid   = safeUidForPackage(pkg);
+          si.label = safeAppLabel(pkg);
+          si.state = s;
+          si.tMs   = SystemClock.elapsedRealtime();
+          sources.put(pkg, si);
+
+          Integer prevI = lastStates.get(pkg);
+          int prev = (prevI != null ? prevI.intValue() : PlaybackState.STATE_NONE);
+          if (prev != s) {
+            logf("state(sync): %s uid=%d %s -> %s", pkg, si.uid, stateName(prev), stateName(s));
+            lastStates.put(pkg, Integer.valueOf(s));
+          }
+        }
       }
     }
 
-    // remove ones that disappeared
-    Set<String> gone = new HashSet<>(sources.keySet());
+    // Detach callbacks for controllers that disappeared
+    Set<String> gone = new HashSet<String>(attached.keySet());
     gone.removeAll(present);
     for (String pkg : gone) {
+      try {
+        MediaController mc = attached.get(pkg);
+        MediaController.Callback cb = callbacks.get(pkg);
+        if (mc != null && cb != null) {
+          try { mc.unregisterCallback(cb); } catch (Throwable ignore) {}
+        }
+      } catch (Throwable ignore) {}
+      attached.remove(pkg);
+      callbacks.remove(pkg);
+
       SourceInfo old = sources.remove(pkg);
-      if (old != null) logf("source gone: %s (was %s)", pkg, stateName(old.state));
+      Integer prevI = lastStates.remove(pkg);
+      int prev = (prevI != null ? prevI.intValue() : PlaybackState.STATE_NONE);
+      if (old != null) logf("source gone: %s (was %s)", pkg, stateName(prev));
     }
   }
 
   // ---------- Respond to UI with current snapshot ----------
   private void replySources() {
-    // Build parallel arrays for easy consumption
-    ArrayList<String> pkgs   = new ArrayList<>();
-    ArrayList<Integer> uids  = new ArrayList<>();
-    ArrayList<String> labels = new ArrayList<>();
-    ArrayList<Integer> states= new ArrayList<>();
+    ArrayList<String> pkgs   = new ArrayList<String>();
+    ArrayList<Integer> uids  = new ArrayList<Integer>();
+    ArrayList<String> labels = new ArrayList<String>();
+    ArrayList<Integer> states= new ArrayList<Integer>();
 
     for (SourceInfo si : sources.values()) {
       pkgs.add(si.pkg);
-      uids.add(si.uid);
+      uids.add(Integer.valueOf(si.uid));
       labels.add(si.label);
-      states.add(si.state);
+      states.add(Integer.valueOf(si.state));
     }
 
     Intent out = new Intent(ACT_SOURCES)
