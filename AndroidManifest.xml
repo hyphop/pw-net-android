@@ -35,6 +35,8 @@
 
   <!-- keep any specific apps you care about -->
   <package android:name="com.foobar2000.foobar2000"/>
+  <package android:name="org.mozilla.firefox"/>
+
 </queries>
 
 
@@ -68,15 +70,5 @@
         android:exported="false"
         android:foregroundServiceType="mediaProjection"/>
 
-    <service
-    android:name=".NLService"
-    android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
-    android:exported="false"
-    android:label="PW-net media-watcher">
-     <intent-filter>
-       <action android:name="android.service.notification.NotificationListenerService"/>
-     </intent-filter>
-    </service>
-
-  </application>
+</application>
 </manifest>

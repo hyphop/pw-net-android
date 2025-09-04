@@ -44,6 +44,20 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+// Java util
+import java.util.List;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.TreeSet;
+import java.util.ArrayList;
+import java.util.Collections;
+
+// Android PM + graphics
+import android.content.pm.ApplicationInfo;
+import android.content.pm.ResolveInfo;
+import android.graphics.drawable.Drawable;  // remove if you drop icons
+
+
 public class MainActivity extends Activity {
   private MdnsDiscoverer mdns;
   private int mdnsEvents = 0;
@@ -51,10 +65,13 @@ public class MainActivity extends Activity {
   private static final String TAG = "pw-mainUI";
   private static final String PREFS="mn_prefs";
   private static final String KEY_HOST="host", KEY_PORT="port", KEY_GAIN="gain", KEY_MUTED="muted";
+  private static final String KEY_SEL_UID = "sel_uid", KEY_SEL_PKG = "sel_pkg";
+
   private static final String ACT_STATE="org.example.mininative.STATE";
   private static final String ACT_STOP="org.example.mininative.STOP";
   private static final String ACT_SET_GAIN="org.example.mininative.SET_GAIN";
   private static final String ACT_SET_MUTED="org.example.mininative.SET_MUTED";
+  private static final String ACT_SET_SOURCE_UID = "ACT_SET_SOURCE_UID"; // match StreamService action
 
   private static final int REQ_MIC=1001, REQ_PROJ=1002, REQ_POST=1003;
 
@@ -82,94 +99,152 @@ private android.widget.FrameLayout switcher;
 private TextView mdnsLabel, audioLabel;  // from previous row
 private int currentTab = -1;
 
-private NLService nls;
+private static final int MAX_ITEMS = 10;
+private static final Set<String> pkgs = new TreeSet<>();
 
-private void dumpPlayers() {
-  if (nls == null) {
-    Log.w(TAG, "NLService not yet bound");
-    return;
-  }
+private View.OnClickListener makeSourceClickListener(final int uid, final String pkg) {
+    return new View.OnClickListener() {
+        @Override public void onClick(View v) {
+            Log.i(TAG, "select source uid=" + uid + " pkg=" + pkg);
 
-  ConcurrentHashMap<Integer, NLService.PlayerInfo> map =
-      new ConcurrentHashMap<>(nls.getStateMap());
+            // save selection
+            if ( uid > -2 ) {
+            prefs.edit()
+                .putInt(KEY_SEL_UID, uid)
+                .putString(KEY_SEL_PKG, pkg)
+                .apply();
+            }
+            populateAudioCandidates(uid);   // rebuild
 
-  if (map.isEmpty()) {
-    Log.i(TAG, "no active players");
-    return;
-  }
-
-  for (Map.Entry<Integer, NLService.PlayerInfo> e : map.entrySet()) {
-    NLService.PlayerInfo p = e.getValue();
-    Log.i(TAG, "uidKey=" + e.getKey()
-        + " pkg=" + p.pkg
-        + " uid=" + p.uid
-        + " state=" + p.state
-        + " time=" + p.timeMs
-        + " title=" + p.title);
-  }
+        }
+    };
 }
 
+private View makeAudioRow(Drawable icon, CharSequence label, final String pkg, final int uid, boolean selected) {
+    LinearLayout row = new LinearLayout(this);
+    row.setOrientation(LinearLayout.HORIZONTAL);
+    row.setGravity(Gravity.CENTER_VERTICAL);
 
-private final ServiceConnection nlsConn = new ServiceConnection() {
-  @Override public void onServiceConnected(ComponentName name, IBinder service) {
-    nls = ((NLService.LocalBinder) service).getService();
-    Log.i(TAG, "NL bound");
-    dumpPlayers();
-    try {
-      unbindService(this); // immediately release the connection
-      nls = null;
-      Log.i(TAG, "NL unbound (one-shot)");
-    } catch (Throwable ignore) {}
+    int pad = dp(6);
+    row.setPadding(pad, pad, pad, pad);
 
-  }
-  @Override public void onServiceDisconnected(ComponentName name) {
-    nls = null;
-    Log.i(TAG, "NL unbound");
-  }
-};
+    // Apply your helper
+    int textColor = GRAY;
+    if (selected) {
+        row.setBackground(makeBg(BLUE, GRAY));
+        textColor = WHITE;
+    } else {
+        row.setBackground(makeBg(BG, GRAY));
+    }
 
+    // App icon
+    ImageView iv = new ImageView(this);
+    LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(20), dp(20));
+    iv.setLayoutParams(ip);
+    if (icon != null) iv.setImageDrawable(icon);
+    row.addView(iv);
 
-private boolean isNLSEnabled() {
-  String flat = android.provider.Settings.Secure.getString(
-      getContentResolver(), "enabled_notification_listeners");
-  return flat != null &&
-         flat.contains(new ComponentName(this, NLService.class).flattenToString());
+    // Label + uid
+    TextView tv = new TextView(this);
+    tv.setText((label != null ? label : pkg) + "  (uid=" + uid + ")");
+    tv.setSingleLine(true);
+    tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+    tv.setTextSize(14);
+    tv.setTextColor(textColor);   // ← invert here
+
+    LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT);
+    tp.leftMargin = dp(8);
+    tv.setLayoutParams(tp);
+    row.addView(tv);
+
+    // Spacing between rows
+    LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT);
+    rowLp.bottomMargin = dp(6);
+    row.setLayoutParams(rowLp);
+
+    // Click → delegate
+    row.setOnClickListener(makeSourceClickListener(uid, pkg));
+
+    return row;
 }
 
-private void openNLSSettings() {
-  try {
-    startActivity(new Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
-  } catch (Exception e) {
-    startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS));
-  }
+private void populateAudioCandidates(final Integer selUid) {
+    Log.i(TAG, "populateAudioCandidates " + selUid);
+
+    if (audioLayout == null) return;
+    audioLayout.removeAllViews();
+
+    PackageManager pm = getPackageManager();
+
+    int curUid  = prefs.getInt(KEY_SEL_UID, -1);
+    String curPkg = prefs.getString(KEY_SEL_PKG, "");
+
+    Log.i(TAG, "+ u:" + curUid + " p:" + curPkg);
+
+    pkgs.add("");
+    pkgs.add("org.mozilla.firefox");
+
+    for (ResolveInfo ri : pm.queryIntentServices(
+        new Intent("android.media.browse.MediaBrowserService"), 0)) {
+        if (ri != null && ri.serviceInfo != null)
+            pkgs.add(ri.serviceInfo.packageName);
+    }
+
+    for (ResolveInfo ri : pm.queryBroadcastReceivers(
+        new Intent(Intent.ACTION_MEDIA_BUTTON), 0)) {
+        if (ri != null && ri.activityInfo != null)
+        pkgs.add(ri.activityInfo.packageName);
+    }
+
+    boolean s = false;
+
+        // Print results
+    for (String pkg : pkgs) {
+        try {
+            CharSequence label;
+            Drawable icon;
+            int uid = -1;
+            if ( pkg != "" ) {
+                ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+                label = pm.getApplicationLabel(ai);
+                icon = pm.getApplicationIcon(ai);
+                uid = ai.uid;
+            } else {
+                label = "Wide";
+                icon = getResources().getDrawable(android.R.drawable.ic_media_play);
+            }
+
+            s = uid == curUid;
+
+            Log.i(TAG, "media"
+                    + " pkg=" + pkg
+                    + " uid=" + uid
+                    + " app=" + label
+                    + " s=" + s
+                    );
+                
+            View row = makeAudioRow(icon, label, pkg, uid, s);
+            audioLayout.addView(row);
+            int count = audioLayout.getChildCount();
+            Log.i("TAG", "items: " + count);
+            //View row = audioLayout.getChildAt(i);
+
+        } catch (PackageManager.NameNotFoundException ignore) {
+        }
+    }
+
 }
 
 // Call this when user taps "Audio Source"
 private void onAudioSourceClick() {
-
-    if (!isNLSEnabled()) {
-    android.widget.Toast.makeText(this, "Enable PW-net in Notification Access", android.widget.Toast.LENGTH_LONG).show();
-    openNLSSettings();
-    return;
-  }
-
-  // Nudge the system to (re)bind the listener, then ask for a snapshot
-  try {
-    if (android.os.Build.VERSION.SDK_INT >= 24) {
-      android.service.notification.NotificationListenerService.requestRebind(
-          new ComponentName(this, NLService.class));
-    }
-  } catch (Throwable ignore) {}
-
   // Ask NLService for a snapshot
   Log.i(TAG, "onClick audio Source");
-
-  // Bind in onStart():
-  bindService(new android.content.Intent(this, NLService.class), nlsConn, BIND_AUTO_CREATE);
-
-// Unbind in onStop():
-// try { unbindService(nlsConn); } catch (Throwable ignore) {}
-
+  //logMediaApps(this);
+  populateAudioCandidates(-2);
 }
 
 private static java.util.List<String> getLocalWifiIPs(Context ctx) {
@@ -291,10 +366,25 @@ private static java.util.List<String> getLocalWifiIPs(Context ctx) {
     if (audioLabel != null) audioLabel.setTextColor(which == 1 ? YEL : WHITE);
     }
 
+private void logPrefs(String tag, SharedPreferences prefs) {
+    if (prefs == null) {
+        Log.i(TAG, "---- PREFS DUMP (" + tag + "): null ----");
+        return;
+    }
+    Map<String, ?> all = prefs.getAll();
+    Log.i(TAG, "---- PREFS DUMP (" + tag + ") ----");
+    for (Map.Entry<String, ?> e : all.entrySet()) {
+        Log.i(TAG, e.getKey() + " = " + String.valueOf(e.getValue()));
+    }
+    Log.i(TAG, "---- END PREFS ----");
+}
+
   @Override protected void onCreate(Bundle b) {
     super.onCreate(b);
-    prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
     Log.i(TAG, "created");
+
+    prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+    logPrefs("onStartCommand", prefs);
 
     int api = android.os.Build.VERSION.SDK_INT;
     Log.i(TAG, "Running API=" + api);
@@ -395,6 +485,7 @@ private static java.util.List<String> getLocalWifiIPs(Context ctx) {
     applyBtn.setOnClickListener(new View.OnClickListener() {
       @Override public void onClick(View v) {
         savePrefs();
+        logPrefs("Apply", prefs);
         float val = clamp01(gainSb.getProgress()/100f);
         if ("CONNECTED".equals(status)) {
           Intent i = new Intent(MainActivity.this, StreamService.class)
@@ -469,6 +560,7 @@ mdnsLabel.setOnClickListener(new View.OnClickListener() {
 // Right: Audio Source (right-aligned naturally)
 audioLabel = t("Audio Source [0/0]");
 audioLabel.setClickable(true);
+
 LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(
     LinearLayout.LayoutParams.WRAP_CONTENT,
     LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -499,7 +591,11 @@ audioLayout = new LinearLayout(this);
 audioLayout.setOrientation(LinearLayout.VERTICAL);
 audioLayout.setPadding(0, dp(4), 0, 0);
 audioLayout.setVisibility(View.GONE);
-switcher.addView(audioLayout);
+ScrollView scroll = new ScrollView(this);
+scroll.addView(audioLayout);
+
+//switcher.addView(audioLayout);
+switcher.addView(scroll);
 
 // Clicks to switch panes (no lambdas)
 mdnsLabel.setOnClickListener(new View.OnClickListener() {
@@ -748,20 +844,36 @@ private void addCandidate(final InetAddress host, final int port, final String[]
     }
   }
 
-  private void savePrefs() {
+private void savePrefs() {
     Log.i(TAG, "save");
+
     String host = hostEt.getText().toString().trim();
     if (host.isEmpty()) host = Config.HOST;
+
     int port;
-    try { port = Integer.parseInt(portEt.getText().toString().trim()); }
-    catch(Exception e){ port = Config.PORT; }
+    try {
+        port = Integer.parseInt(portEt.getText().toString().trim());
+    } catch(Exception e) {
+        port = Config.PORT;
+    }
     if (port < 1 || port > 65535) port = Config.PORT;
-    float gain = clamp01(gainSb.getProgress()/100f);
-    prefs.edit().putString(KEY_HOST, host)
+
+    float gain = clamp01(gainSb.getProgress() / 100f);
+
+    // read current values to save
+    boolean m = muted;  // use your field
+    int selUid = prefs.getInt(KEY_SEL_UID, -1);      // or from a field
+    String selPkg = prefs.getString(KEY_SEL_PKG, ""); // or from a field
+
+    prefs.edit()
+        .putString(KEY_HOST, host)
         .putInt(KEY_PORT, port)
         .putFloat(KEY_GAIN, gain)
+        .putBoolean(KEY_MUTED, m)
+        .putInt(KEY_SEL_UID, selUid)
+        .putString(KEY_SEL_PKG, selPkg)
         .apply();
-  }
+}
 
   private void startFlow() {
     savePrefs();

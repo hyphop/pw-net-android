@@ -51,13 +51,19 @@ public class StreamService extends Service implements Runnable {
   private static final String KEY_HOST = "host", KEY_PORT = "port", KEY_GAIN = "gain",
                               KEY_MUTED = "muted";
 
+  private static final String K_SEL_UID = "sel_uid";
+  private static final String K_SEL_PKG = "sel_pkg";
+
+  private static final String ACT_SET_SOURCE_UID     = "ACT_SET_SOURCE_UID";      // UI may send extras
+  private static final String ACT_APPLY_SAVED_SOURCE = "ACT_APPLY_SAVED_SOURCE";  // UI nudges without extras
 
   // status
   private volatile boolean running = false;
   private volatile boolean stopping = false;
   private volatile boolean muted = false;
   private volatile float gain = 1.0f; // 0..1
-
+  private volatile int appUid = -1;
+  private volatile String appPkg = "";
   private String host;
   private int port;
 
@@ -135,6 +141,8 @@ public class StreamService extends Service implements Runnable {
     port = prefs.getInt(KEY_PORT, Config.PORT);
     gain = clamp01(prefs.getFloat(KEY_GAIN, 1.0f));
     muted = prefs.getBoolean(KEY_MUTED, false);
+    appUid = prefs.getInt("sel_uid", -1);
+    appPkg = prefs.getString("sel_pkg", "System");
 
     ensureChannel();
 
@@ -385,6 +393,7 @@ private void logAudioRecordConfig(AudioRecord rec) {
   public void run() {
 
     //debug_info();
+    /*
     String CFG_PKG = Config.CAPTURE_APP_NAME;
     int CAPTURE_APP_UID     = Config.CAPTURE_APP_UID;
     String pkg_cap = (CFG_PKG != null) ? CFG_PKG.trim() : null;
@@ -399,6 +408,7 @@ private void logAudioRecordConfig(AudioRecord rec) {
         Log.i(TAG, "Fail-Safe:  app " + pkg_cap + " uid=" + appUid);
     }
     }
+    */
 
     final int SR = 48000, CHN = 2, BYTES = 2;
 
@@ -428,10 +438,10 @@ private void logAudioRecordConfig(AudioRecord rec) {
               .addMatchingUsage(AudioAttributes.USAGE_MEDIA);
 
       if (appUid > 0) {
-        Log.i(TAG, "Capture filter by appUID " + appUid);
+        Log.i(TAG, "Capture filter by appUID " + appUid + " " + appPkg);
         b.addMatchingUid(appUid);
       } else {
-        Log.i(TAG, "Whide system capture mode - low quality");
+        Log.i(TAG, "Whide system capture mode");
       }
 
       AudioPlaybackCaptureConfiguration cfg = b.build();
