@@ -34,11 +34,21 @@ import java.util.Locale;
 
 import android.content.ComponentName;
 
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.ServiceConnection;
+import android.os.IBinder;
+
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
 public class MainActivity extends Activity {
   private MdnsDiscoverer mdns;
   private int mdnsEvents = 0;
 
-  private static final String TAG = "MainActivity";
+  private static final String TAG = "pw-mainUI";
   private static final String PREFS="mn_prefs";
   private static final String KEY_HOST="host", KEY_PORT="port", KEY_GAIN="gain", KEY_MUTED="muted";
   private static final String ACT_STATE="org.example.mininative.STATE";
@@ -72,8 +82,52 @@ private android.widget.FrameLayout switcher;
 private TextView mdnsLabel, audioLabel;  // from previous row
 private int currentTab = -1;
 
-// === NLService hooks ===
-private android.content.BroadcastReceiver sourcesRx;
+private NLService nls;
+
+private void dumpPlayers() {
+  if (nls == null) {
+    Log.w(TAG, "NLService not yet bound");
+    return;
+  }
+
+  ConcurrentHashMap<Integer, NLService.PlayerInfo> map =
+      new ConcurrentHashMap<>(nls.getStateMap());
+
+  if (map.isEmpty()) {
+    Log.i(TAG, "no active players");
+    return;
+  }
+
+  for (Map.Entry<Integer, NLService.PlayerInfo> e : map.entrySet()) {
+    NLService.PlayerInfo p = e.getValue();
+    Log.i(TAG, "uidKey=" + e.getKey()
+        + " pkg=" + p.pkg
+        + " uid=" + p.uid
+        + " state=" + p.state
+        + " time=" + p.timeMs
+        + " title=" + p.title);
+  }
+}
+
+
+private final ServiceConnection nlsConn = new ServiceConnection() {
+  @Override public void onServiceConnected(ComponentName name, IBinder service) {
+    nls = ((NLService.LocalBinder) service).getService();
+    Log.i(TAG, "NL bound");
+    dumpPlayers();
+    try {
+      unbindService(this); // immediately release the connection
+      nls = null;
+      Log.i(TAG, "NL unbound (one-shot)");
+    } catch (Throwable ignore) {}
+
+  }
+  @Override public void onServiceDisconnected(ComponentName name) {
+    nls = null;
+    Log.i(TAG, "NL unbound");
+  }
+};
+
 
 private boolean isNLSEnabled() {
   String flat = android.provider.Settings.Secure.getString(
@@ -109,7 +163,13 @@ private void onAudioSourceClick() {
 
   // Ask NLService for a snapshot
   Log.i(TAG, "onClick audio Source");
-  sendBroadcast(new Intent(NLService.ACT_ASK_SOURCES).setPackage(getPackageName()));
+
+  // Bind in onStart():
+  bindService(new android.content.Intent(this, NLService.class), nlsConn, BIND_AUTO_CREATE);
+
+// Unbind in onStop():
+// try { unbindService(nlsConn); } catch (Throwable ignore) {}
+
 }
 
 private static java.util.List<String> getLocalWifiIPs(Context ctx) {
@@ -235,6 +295,10 @@ private static java.util.List<String> getLocalWifiIPs(Context ctx) {
     super.onCreate(b);
     prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
     Log.i(TAG, "created");
+
+    int api = android.os.Build.VERSION.SDK_INT;
+    Log.i(TAG, "Running API=" + api);
+
 
     // just log the IPs on start
     for (String ip : getLocalWifiIPs(this)) {
@@ -577,42 +641,11 @@ private void addCandidate(final InetAddress host, final int port, final String[]
     Log.i(TAG, "mdns start()");
   }
 
-  protected void onResumeAudioSources() {
-  if (sourcesRx == null) {
-    sourcesRx = new BroadcastReceiver() {
-      @Override public void onReceive(android.content.Context ctx, Intent i) {
-        if (!NLService.ACT_SOURCES.equals(i.getAction())) return;
-
-        java.util.ArrayList<String>  pkgs   = i.getStringArrayListExtra("pkgs");
-        java.util.ArrayList<Integer> uids   = i.getIntegerArrayListExtra("uids");
-        java.util.ArrayList<String>  labels = i.getStringArrayListExtra("labels");
-        java.util.ArrayList<Integer> states = i.getIntegerArrayListExtra("states");
-
-        if (pkgs == null) {
-          Log.i(TAG, "SOURCES: <null>");
-          return;
-        }
-        Log.i(TAG, "SOURCES: count=" + pkgs.size());
-        for (int k = 0; k < pkgs.size(); k++) {
-          String pkg   = pkgs.get(k);
-          int    uid   = (uids   != null && k < uids.size())   ? uids.get(k)   : -1;
-          String label = (labels != null && k < labels.size()) ? labels.get(k) : pkg;
-          int    st    = (states != null && k < states.size()) ? states.get(k) : 0;
-          Log.i(TAG, "  #" + k + " " + label + " pkg=" + pkg + " uid=" + uid + " state=" + st);
-        }
-      }
-    };
-  }
-    Log.i(TAG,"register NLservice recv");
-    registerReceiver(sourcesRx, new IntentFilter(NLService.ACT_SOURCES));
-  }
-
 
   @Override protected void onResume() {
     super.onResume();
     Log.i(TAG, "resume");
     registerReceiver(br, new IntentFilter(ACT_STATE));
-    onResumeAudioSources();
     setStateButtonFor(status);
   }
 
@@ -620,7 +653,6 @@ private void addCandidate(final InetAddress host, final int port, final String[]
     super.onPause();
     Log.i(TAG, "pause");
     try { unregisterReceiver(br); } catch (Throwable ignore) {}
-   // try { if (sourcesRx != null) unregisterReceiver(sourcesRx); }  catch (Throwable ignore) {}
   }
 
   @Override protected void onStop() {

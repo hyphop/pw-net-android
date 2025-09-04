@@ -22,7 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class MdnsDiscoverer {
-    private static final String TAG = "MDNS";
+    private static final String TAG = "pw-mdns";
 
     // Simple callback: give host, port, and raw TXT[] lines (arrival order preserved)
     public interface Callback {

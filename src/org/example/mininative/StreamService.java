@@ -35,7 +35,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 
 public class StreamService extends Service implements Runnable {
-  private static final String TAG = "MiniNativeStream";
+  private static final String TAG = "pw-stream";
 
   // intents / channel
   private static final String CH = "pwnet_stream_v2";
@@ -107,7 +107,7 @@ public class StreamService extends Service implements Runnable {
         Log.i(TAG, "gain=" + gain);
         sendState(running ? "CONNECTED" : (stopping ? "STOPPING" : "DISCONNECTED"), 0, 0,
                   0);
-        updateNotif(running ? "CONNECTED" : (stopping ? "STOPPING" : "DISCONNECTED"));
+        //updateNotif(running ? "CONNECTED" : (stopping ? "STOPPING" : "DISCONNECTED"));
         return START_STICKY;
       }
       if (ACT_SET_MUTED.equals(act)) {
@@ -172,22 +172,31 @@ public class StreamService extends Service implements Runnable {
     return bmp;
   }
 
+// class field
+private int SmallIconId = -1;  // -1 = not resolved yet
+
 private int smallIconRes() {
+  if (SmallIconId != -1) {
+    // already resolved & logged
+    return SmallIconId;
+  }
+
   int id = 0;
   try {
     id = getResources().getIdentifier("ic_stat_pwnet", "drawable", getPackageName());
   } catch (Throwable ignore) {}
 
-  if (id != 0) {
-    try { Log.i(TAG, "small icon id=" + id + " name=" + getResources().getResourceName(id)); }
-    catch (android.content.res.Resources.NotFoundException ignore) {}
-    return id;
+  if (id == 0) {
+    id = android.R.drawable.ic_media_play; // fallback
   }
 
-  int fb = android.R.drawable.ic_media_play; // fallback
-  try { Log.i(TAG, "small icon fallback id=" + fb + " name=" + getResources().getResourceName(fb)); }
-  catch (android.content.res.Resources.NotFoundException ignore) {}
-  return fb;
+  // log once
+  try {
+    Log.i(TAG, "small icon id=" + id + " name=" + getResources().getResourceName(id));
+  } catch (android.content.res.Resources.NotFoundException ignore) {}
+
+  return SmallIconId = id;
+
 }
 
   private void ensureChannel() {

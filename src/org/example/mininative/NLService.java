@@ -1,368 +1,214 @@
+// src/org/example/mininative/NLService.java
 package org.example.mininative;
 
-import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
-import android.os.Build;
-import android.os.Handler;
-import android.os.Looper;
-import android.os.SystemClock;
+import android.os.Binder;
+import android.os.IBinder;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
-public class NLService extends NotificationListenerService {
+/**
+ * Super-simple Notification Listener that:
+ *  1) Logs lifecycle + media session events.
+ *  2) Maintains a state hash keyed by uid (fallback: pkg.hashCode()) with {pkg, uid, state, time, title}.
+ *  3) Exposes the live map to the main UI via a bound service (no JSON, no broadcasts).
+ */
+public class NLService extends NotificationListenerService
+        implements MediaSessionManager.OnActiveSessionsChangedListener {
 
-  // === public intents (UI <-> service) ===
-  public static final String ACT_ASK_SOURCES = "org.example.mininative.ASK_SOURCES";
-  public static final String ACT_SOURCES     = "org.example.mininative.SOURCES";
+  private static final String TAG = "pw-nlsSrv";
+  private static final String TAG2 = "pw-nls";
+  private static final String SYS_ACTION = NotificationListenerService.SERVICE_INTERFACE;
+  // "android.service.notification.NotificationListenerService"
 
-  private static final String TAG = "MediaWatch";
-
-  // session snapshot (pkg -> info)
-  private final Map<String, SourceInfo> sources = new HashMap<String, SourceInfo>();
-
-  // track attached controllers + callbacks + last states (to catch PLAYING/PAUSED changes)
-  private final Map<String, MediaController> attached = new HashMap<String, MediaController>();
-  private final Map<String, MediaController.Callback> callbacks = new HashMap<String, MediaController.Callback>();
-  private final Map<String, Integer> lastStates = new HashMap<String, Integer>();
-
-  private MediaSessionManager msm;
-  private Handler ui;
-  private BroadcastReceiver askRx;
-  private boolean sessionsCbRegistered = false;
-
-  private static void logf(String fmt, Object... args) {
-    Log.i(TAG,
-        String.format(Locale.US, "[%6d] ", SystemClock.elapsedRealtime() % 1_000_000)
-            + String.format(Locale.US, fmt, args));
+  // single logging helper
+  private static void logi(String msg) {
+      Log.i(TAG2, msg);
   }
 
-  // ---------- Lifecycle ----------
+  public static final class PlayerInfo {
+    public String pkg;
+    public int uid;
+    public int state;     // PlaybackState.STATE_*
+    public long timeMs;   // System.currentTimeMillis()
+    public String title;
+  }
+
+  // Live state hash: key = uid if >0 else pkg.hashCode()
+  private static final ConcurrentMap<Integer, PlayerInfo> STATE = new ConcurrentHashMap<>();
+
+  private final IBinder binder = new LocalBinder();
+  public final class LocalBinder extends Binder {
+    public NLService getService() { return NLService.this; }
+  }
+
+  private MediaSessionManager msm;
+
+  // ===== Lifecycle / binding =====
   @Override public void onCreate() {
     super.onCreate();
-    ui  = new Handler(Looper.getMainLooper());
-    msm = (MediaSessionManager) getSystemService(MEDIA_SESSION_SERVICE);
+    logi("onCreate");
+  }
 
-    // Listen for one-shot UI queries
-    askRx = new BroadcastReceiver() {
-      @Override public void onReceive(Context ctx, Intent i) {
-        if (ACT_ASK_SOURCES.equals(i.getAction())) {
-          logf("ASK_SOURCES received");
-          replySources(); // answer immediately with current snapshot
-        }
-      }
-    };
-    registerReceiver(askRx, new IntentFilter(ACT_ASK_SOURCES));
+  @Override public IBinder onBind(android.content.Intent intent) {
+    logi("onBind");
+    // If the system is binding us as a notification-listener, defer to the framework.
+    if (intent != null && SYS_ACTION.equals(intent.getAction())) {
+      return super.onBind(intent);
+    }
+    // Otherwise, it's our app binding to fetch the map.
+    return binder;
+  }
 
-    logf("onCreate");
-    // take initial snapshot (will work only if user granted Notification Access)
-    safeSnapshotActiveSessions();
-    // and start watching changes
-    safeRegisterSessionsListener();
+  @Override public boolean onUnbind(android.content.Intent intent) {
+    logi("onUnbind");
+    return super.onUnbind(intent);
   }
 
   @Override public void onDestroy() {
-    try { unregisterReceiver(askRx); } catch (Throwable ignore) {}
-    try {
-      if (msm != null && sessionsCbRegistered) {
-        msm.removeOnActiveSessionsChangedListener(sessionsCb);
-      }
-    } catch (Throwable ignore) {}
-
-    // Detach all controller callbacks
-    try {
-      for (String pkg : new ArrayList<String>(attached.keySet())) {
-        MediaController mc = attached.get(pkg);
-        MediaController.Callback cb = callbacks.get(pkg);
-        if (mc != null && cb != null) {
-          try { mc.unregisterCallback(cb); } catch (Throwable ignore) {}
-        }
-      }
-      attached.clear();
-      callbacks.clear();
-      lastStates.clear();
-    } catch (Throwable ignore) {}
-
-    logf("onDestroy");
+    logi("onDestroy");
+    if (msm != null) {
+      try { msm.removeOnActiveSessionsChangedListener(this); } catch (Throwable ignore) {}
+    }
     super.onDestroy();
   }
 
-  // ---------- Notification Listener callbacks ----------
+  // ===== NotificationListenerService =====
   @Override public void onListenerConnected() {
-    super.onListenerConnected();
-    logf("onListenerConnected: NLS permission active");
-    safeSnapshotActiveSessions();
+    logi("onListenerConnected");
+    msm = (MediaSessionManager) getSystemService(Context.MEDIA_SESSION_SERVICE);
+    ComponentName me = new ComponentName(this, NLService.class);
+    if (msm != null) {
+      msm.addOnActiveSessionsChangedListener(this, me);
+      List<MediaController> init = msm.getActiveSessions(me);
+      onActiveSessionsChanged(init);
+    }
   }
 
   @Override public void onListenerDisconnected() {
-    super.onListenerDisconnected();
-    logf("onListenerDisconnected: NLS permission lost?");
+    logi("onListenerDisconnected");
+    if (msm != null) {
+      try { msm.removeOnActiveSessionsChangedListener(this); } catch (Throwable ignore) {}
+    }
   }
 
+  // Optional: log notifications (not used for state)
   @Override public void onNotificationPosted(StatusBarNotification sbn) {
-    // Keep for debugging; reads title via extras (you can trim if too noisy)
-    try {
-      String pkg = sbn.getPackageName();
-      int uid = safeUidForPackage(pkg);
-      String ch = (Build.VERSION.SDK_INT >= 26 && sbn.getNotification() != null)
-                  ? sbn.getNotification().getChannelId() : "n/a";
-      CharSequence title = (sbn.getNotification() != null
-                            && sbn.getNotification().extras != null)
-                            ? sbn.getNotification().extras.getCharSequence("android.title")
-                            : null;
-      logf("notif POST pkg=%s uid=%d id=%d ch=%s title=%s",
-          pkg, uid, sbn.getId(), ch, String.valueOf(title));
-    } catch (Throwable t) {
-      logf("notif POST (error) %s", t.getMessage());
-    }
+    logi("onNotificationPosted: " + sbn.getPackageName());
   }
-
   @Override public void onNotificationRemoved(StatusBarNotification sbn) {
-    try {
-      String pkg = sbn.getPackageName();
-      int uid = safeUidForPackage(pkg);
-      logf("notif REMOVE pkg=%s uid=%d id=%d", pkg, uid, sbn.getId());
-    } catch (Throwable t) {
-      logf("notif REMOVE (error) %s", t.getMessage());
-    }
+    logi("onNotificationRemoved: " + sbn.getPackageName());
   }
 
-  @Override public void onNotificationRemoved(StatusBarNotification sbn,
-                                              RankingMap rankingMap, int reason) {
-    onNotificationRemoved(sbn); // keep one log format
-  }
+  // ===== Media sessions tracking =====
+  @Override
+  public void onActiveSessionsChanged(List<MediaController> controllers) {
+    int n = (controllers == null) ? 0 : controllers.size();
+    logi("onActiveSessionsChanged n=" + n);
+    if (controllers == null) return;
 
-  // ---------- Media sessions (who is playing) ----------
-  private final MediaSessionManager.OnActiveSessionsChangedListener sessionsCb =
-      new MediaSessionManager.OnActiveSessionsChangedListener() {
-        @Override public void onActiveSessionsChanged(List<MediaController> ctrls) {
-          logf("sessions changed size=%s", (ctrls != null ? String.valueOf(ctrls.size()) : "null"));
-          rebuildSources(ctrls);
-        }
-      };
+    for (MediaController mc : controllers) {
+      if (mc == null) continue;
+      final String pkg = mc.getPackageName();
+      final int uid = resolveUid(pkg);
+      // Initial snapshot
+      updateFromController(mc, uid, pkg);
 
-  private void safeRegisterSessionsListener() {
-    try {
-      if (msm != null && !sessionsCbRegistered) {
-        msm.addOnActiveSessionsChangedListener(
-            sessionsCb, new ComponentName(this, NLService.class), ui);
-        sessionsCbRegistered = true;
-        logf("registered sessionsCb");
-      }
-    } catch (SecurityException se) {
-      logf("sessions listener NOT registered (grant Notification access in Settings)");
-    } catch (Throwable t) {
-      logf("sessions listener register error: %s", t.getMessage());
-    }
-  }
-
-  private void safeSnapshotActiveSessions() {
-    try {
-      List<MediaController> ctrls =
-          (msm != null) ? msm.getActiveSessions(new ComponentName(this, NLService.class)) : null;
-      rebuildSources(ctrls);
-    } catch (SecurityException se) {
-      logf("snapshot: no permission (enable Notification access)");
-    } catch (Throwable t) {
-      logf("snapshot error: %s", t.getMessage());
-    }
-  }
-
-  // Attach callbacks to controllers, update SourceInfo on every state change (incl. PAUSED).
-  private void rebuildSources(List<MediaController> ctrls) {
-    // Build set of present packages
-    Set<String> present = new HashSet<String>();
-    if (ctrls != null) {
-      for (MediaController mc : ctrls) {
-        final String pkg = mc.getPackageName();
-        present.add(pkg);
-
-        // Attach callback once per package
-        if (!attached.containsKey(pkg)) {
-          MediaController.Callback cb = new MediaController.Callback() {
-            @Override public void onPlaybackStateChanged(PlaybackState st) {
-              int s = (st != null ? st.getState() : PlaybackState.STATE_NONE);
-
-              // Update snapshot
-              SourceInfo si = sources.get(pkg);
-              if (si == null) si = new SourceInfo();
-              si.pkg   = pkg;
-              si.uid   = safeUidForPackage(pkg);
-              si.label = safeAppLabel(pkg);
-              si.state = s;
-              si.tMs   = SystemClock.elapsedRealtime();
-              sources.put(pkg, si);
-
-              // Log only on change
-              Integer prevI = lastStates.get(pkg);
-              int prev = (prevI != null ? prevI.intValue() : PlaybackState.STATE_NONE);
-              if (prev != s) {
-                logf("state: %s uid=%d %s -> %s", pkg, si.uid, stateName(prev), stateName(s));
-                lastStates.put(pkg, Integer.valueOf(s));
-              }
-            }
-          };
-          try { mc.registerCallback(cb, ui); } catch (Throwable ignore) {}
-          attached.put(pkg, mc);
-          callbacks.put(pkg, cb);
-
-          // Initial snapshot/log without waiting for callback
-          PlaybackState st = null;
-          try { st = mc.getPlaybackState(); } catch (Throwable ignore) {}
-          int s0 = (st != null ? st.getState() : PlaybackState.STATE_NONE);
-
-          SourceInfo si0 = sources.get(pkg);
-          if (si0 == null) si0 = new SourceInfo();
-          si0.pkg   = pkg;
-          si0.uid   = safeUidForPackage(pkg);
-          si0.label = safeAppLabel(pkg);
-          si0.state = s0;
-          si0.tMs   = SystemClock.elapsedRealtime();
-          sources.put(pkg, si0);
-
-          Integer prevI = lastStates.get(pkg);
-          int prev = (prevI != null ? prevI.intValue() : PlaybackState.STATE_NONE);
-          if (prev != s0) {
-            logf("initial: %s uid=%d %s -> %s", pkg, si0.uid, stateName(prev), stateName(s0));
-            lastStates.put(pkg, Integer.valueOf(s0));
-          } else {
-            logf("initial: %s already %s", pkg, stateName(s0));
-          }
-        } else {
-          // Already attached; refresh current state into snapshot
-          PlaybackState st = null;
-          try { st = mc.getPlaybackState(); } catch (Throwable ignore) {}
-          int s = (st != null ? st.getState() : PlaybackState.STATE_NONE);
-
-          SourceInfo si = sources.get(pkg);
-          if (si == null) si = new SourceInfo();
-          si.pkg   = pkg;
-          si.uid   = safeUidForPackage(pkg);
-          si.label = safeAppLabel(pkg);
-          si.state = s;
-          si.tMs   = SystemClock.elapsedRealtime();
-          sources.put(pkg, si);
-
-          Integer prevI = lastStates.get(pkg);
-          int prev = (prevI != null ? prevI.intValue() : PlaybackState.STATE_NONE);
-          if (prev != s) {
-            logf("state(sync): %s uid=%d %s -> %s", pkg, si.uid, stateName(prev), stateName(s));
-            lastStates.put(pkg, Integer.valueOf(s));
-          }
-        }
-      }
-    }
-
-    // Detach callbacks for controllers that disappeared
-    Set<String> gone = new HashSet<String>(attached.keySet());
-    gone.removeAll(present);
-    for (String pkg : gone) {
+      // Listen for future changes
       try {
-        MediaController mc = attached.get(pkg);
-        MediaController.Callback cb = callbacks.get(pkg);
-        if (mc != null && cb != null) {
-          try { mc.unregisterCallback(cb); } catch (Throwable ignore) {}
-        }
-      } catch (Throwable ignore) {}
-      attached.remove(pkg);
-      callbacks.remove(pkg);
-
-      SourceInfo old = sources.remove(pkg);
-      Integer prevI = lastStates.remove(pkg);
-      int prev = (prevI != null ? prevI.intValue() : PlaybackState.STATE_NONE);
-      if (old != null) logf("source gone: %s (was %s)", pkg, stateName(prev));
-    }
-  }
-
-  // ---------- Respond to UI with current snapshot ----------
-  private void replySources() {
-    ArrayList<String> pkgs   = new ArrayList<String>();
-    ArrayList<Integer> uids  = new ArrayList<Integer>();
-    ArrayList<String> labels = new ArrayList<String>();
-    ArrayList<Integer> states= new ArrayList<Integer>();
-
-    for (SourceInfo si : sources.values()) {
-      pkgs.add(si.pkg);
-      uids.add(Integer.valueOf(si.uid));
-      labels.add(si.label);
-      states.add(Integer.valueOf(si.state));
-    }
-
-    Intent out = new Intent(ACT_SOURCES)
-        .putStringArrayListExtra("pkgs", pkgs)
-        .putIntegerArrayListExtra("uids", uids)
-        .putStringArrayListExtra("labels", labels)
-        .putIntegerArrayListExtra("states", states)
-        .putExtra("ts", SystemClock.elapsedRealtime());
-    out.setPackage(getPackageName()); // in-app only
-    sendBroadcast(out);
-
-    logf("SOURCES sent: %d items", pkgs.size());
-  }
-
-  // ---------- Helpers ----------
-  private int safeUidForPackage(String pkg) {
-    try {
-      PackageManager pm = getPackageManager();
-      if (Build.VERSION.SDK_INT >= 33) {
-        ApplicationInfo ai = pm.getApplicationInfo(pkg,
-            PackageManager.ApplicationInfoFlags.of(0));
-        return ai.uid;
-      } else {
-        ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
-        return ai.uid;
+        mc.registerCallback(new MediaController.Callback() {
+          @Override public void onPlaybackStateChanged(PlaybackState stateObj) {
+            updateFromController(mc, uid, pkg);
+          }
+          @Override public void onMetadataChanged(MediaMetadata metadata) {
+            updateFromController(mc, uid, pkg);
+          }
+          @Override public void onSessionDestroyed() {
+            updateState(uid, pkg, PlaybackState.STATE_STOPPED, now(), currentTitle(mc));
+          }
+        });
+      } catch (Throwable t) {
+        logi("WARN registerCallback failed for " + pkg + " : " + t);
       }
-    } catch (Throwable t) {
+    }
+  }
+
+  private void updateFromController(MediaController mc, int uid, String pkg) {
+    int st = PlaybackState.STATE_NONE;
+    try {
+      PlaybackState ps = mc.getPlaybackState();
+      if (ps != null) st = ps.getState();
+    } catch (Throwable ignore) {}
+    String title = currentTitle(mc);
+    updateState(uid, pkg, st, now(), title);
+  }
+
+  private String currentTitle(MediaController mc) {
+    try {
+      MediaMetadata md = mc.getMetadata();
+      if (md != null) {
+        String t = md.getString(MediaMetadata.METADATA_KEY_TITLE);
+        if (t != null) return t;
+      }
+    } catch (Throwable ignore) {}
+    return null;
+  }
+
+  private void updateState(int uid, String pkg, int st, long time, String title) {
+    if (pkg == null && uid <= 0) return;
+    int key = (uid > 0) ? uid : pkg.hashCode();
+
+    PlayerInfo pi = STATE.get(key);
+    if (pi == null) {
+      pi = new PlayerInfo();
+      pi.pkg = pkg;
+      pi.uid = uid;
+      STATE.put(key, pi);
+    }
+    pi.state = st;
+    pi.timeMs = time;
+    pi.title = title;
+
+    logi("state pkg=" + pkg + " uid=" + uid + " st=" + st + " time=" + time + " title=" + title);
+  }
+
+  private int resolveUid(String pkg) {
+    if (pkg == null) return -1;
+    try {
+      ApplicationInfo ai = getPackageManager().getApplicationInfo(pkg, 0);
+      return ai.uid;
+    } catch (PackageManager.NameNotFoundException e) {
       return -1;
     }
   }
 
-  private String safeAppLabel(String pkg) {
-    try {
-      PackageManager pm = getPackageManager();
-      if (Build.VERSION.SDK_INT >= 33) {
-        return String.valueOf(pm.getApplicationLabel(
-            pm.getApplicationInfo(pkg, PackageManager.ApplicationInfoFlags.of(0))));
-      } else {
-        return String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)));
-      }
-    } catch (Throwable t) {
-      return pkg;
-    }
+  private long now() { return System.currentTimeMillis(); }
+
+  // ===== Public API for main UI =====
+  /** Returns the live state map. Same-process only; do not mutate entries recklessly. */
+  public ConcurrentMap<Integer, PlayerInfo> getStateMap() {
+    return STATE;
   }
 
-  private static String stateName(int s) {
-    switch (s) {
-      case PlaybackState.STATE_PLAYING:   return "PLAYING";
-      case PlaybackState.STATE_BUFFERING: return "BUFFERING";
-      case PlaybackState.STATE_PAUSED:    return "PAUSED";
-      case PlaybackState.STATE_STOPPED:   return "STOPPED";
-      case PlaybackState.STATE_NONE:
-      default: return "NONE(" + s + ")";
+  /** Convenience dump for quick logging from the UI if needed. */
+  public void logStateSnapshot(String tag) {
+    for (Map.Entry<Integer, PlayerInfo> e : STATE.entrySet()) {
+      PlayerInfo p = e.getValue();
+      Log.i(tag, "key=" + e.getKey() + " pkg=" + p.pkg + " uid=" + p.uid +
+          " st=" + p.state + " time=" + p.timeMs + " title=" + p.title);
     }
-  }
-
-  private static final class SourceInfo {
-    String pkg;
-    int    uid;
-    String label;
-    int    state;
-    long   tMs;
   }
 }
