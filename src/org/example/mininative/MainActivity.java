@@ -577,11 +577,42 @@ private void addCandidate(final InetAddress host, final int port, final String[]
     Log.i(TAG, "mdns start()");
   }
 
+  protected void onResumeAudioSources() {
+  if (sourcesRx == null) {
+    sourcesRx = new BroadcastReceiver() {
+      @Override public void onReceive(android.content.Context ctx, Intent i) {
+        if (!NLService.ACT_SOURCES.equals(i.getAction())) return;
+
+        java.util.ArrayList<String>  pkgs   = i.getStringArrayListExtra("pkgs");
+        java.util.ArrayList<Integer> uids   = i.getIntegerArrayListExtra("uids");
+        java.util.ArrayList<String>  labels = i.getStringArrayListExtra("labels");
+        java.util.ArrayList<Integer> states = i.getIntegerArrayListExtra("states");
+
+        if (pkgs == null) {
+          Log.i(TAG, "SOURCES: <null>");
+          return;
+        }
+        Log.i(TAG, "SOURCES: count=" + pkgs.size());
+        for (int k = 0; k < pkgs.size(); k++) {
+          String pkg   = pkgs.get(k);
+          int    uid   = (uids   != null && k < uids.size())   ? uids.get(k)   : -1;
+          String label = (labels != null && k < labels.size()) ? labels.get(k) : pkg;
+          int    st    = (states != null && k < states.size()) ? states.get(k) : 0;
+          Log.i(TAG, "  #" + k + " " + label + " pkg=" + pkg + " uid=" + uid + " state=" + st);
+        }
+      }
+    };
+  }
+    Log.i(TAG,"register NLservice recv");
+    registerReceiver(sourcesRx, new IntentFilter(NLService.ACT_SOURCES));
+  }
+
 
   @Override protected void onResume() {
     super.onResume();
     Log.i(TAG, "resume");
     registerReceiver(br, new IntentFilter(ACT_STATE));
+    onResumeAudioSources();
     setStateButtonFor(status);
   }
 
@@ -589,6 +620,7 @@ private void addCandidate(final InetAddress host, final int port, final String[]
     super.onPause();
     Log.i(TAG, "pause");
     try { unregisterReceiver(br); } catch (Throwable ignore) {}
+   // try { if (sourcesRx != null) unregisterReceiver(sourcesRx); }  catch (Throwable ignore) {}
   }
 
   @Override protected void onStop() {
