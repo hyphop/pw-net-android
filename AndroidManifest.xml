@@ -15,14 +15,26 @@
   <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
 
 <queries>
-  <!-- Browsers -->
+  <!-- Browsers (schemes) -->
   <intent>
     <action android:name="android.intent.action.VIEW"/>
+    <category android:name="android.intent.category.BROWSABLE"/>
     <data android:scheme="http"/>
   </intent>
   <intent>
     <action android:name="android.intent.action.VIEW"/>
+    <category android:name="android.intent.category.BROWSABLE"/>
     <data android:scheme="https"/>
+  </intent>
+
+  <!-- Media-capable apps (by MIME types) -->
+  <intent>
+    <action android:name="android.intent.action.VIEW"/>
+    <data android:mimeType="audio/*"/>
+  </intent>
+  <intent>
+    <action android:name="android.intent.action.VIEW"/>
+    <data android:mimeType="video/*"/>
   </intent>
 
   <!-- Media players -->
@@ -32,11 +44,14 @@
   <intent>
     <action android:name="android.intent.action.MEDIA_BUTTON"/>
   </intent>
+  <intent>
+    <action android:name="android.intent.action.MUSIC_PLAYER"/>
+  </intent>
 
-  <!-- keep any specific apps you care about -->
+  <!-- Specific apps you always want visible -->
   <package android:name="com.foobar2000.foobar2000"/>
   <package android:name="org.mozilla.firefox"/>
-
+  <package android:name="org.mozilla.focus"/>
 </queries>
 
 

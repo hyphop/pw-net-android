@@ -57,7 +57,6 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.ResolveInfo;
 import android.graphics.drawable.Drawable;  // remove if you drop icons
 
-
 public class MainActivity extends Activity {
   private MdnsDiscoverer mdns;
   private int mdnsEvents = 0;
@@ -192,14 +191,25 @@ private void populateAudioCandidates(final Integer selUid) {
         new Intent("android.media.browse.MediaBrowserService"), 0)) {
         if (ri != null && ri.serviceInfo != null)
             pkgs.add(ri.serviceInfo.packageName);
+            Log.i(TAG,"+ " + ri.serviceInfo.packageName);
     }
 
     for (ResolveInfo ri : pm.queryBroadcastReceivers(
         new Intent(Intent.ACTION_MEDIA_BUTTON), 0)) {
         if (ri != null && ri.activityInfo != null)
         pkgs.add(ri.activityInfo.packageName);
+        Log.i(TAG,"++ " + ri.activityInfo.packageName);
     }
 
+Intent v = new Intent(Intent.ACTION_VIEW);
+v.setData(android.net.Uri.parse("https://example.com/anything"));
+for (ResolveInfo ri : pm.queryIntentActivities(v, 0))
+    if (ri.activityInfo != null)  {
+        pkgs.add(ri.activityInfo.packageName);
+        Log.i(TAG,"++++ " + ri.activityInfo.packageName);
+    }
+
+///
     boolean s = false;
 
         // Print results
@@ -226,7 +236,7 @@ private void populateAudioCandidates(final Integer selUid) {
                     + " app=" + label
                     + " s=" + s
                     );
-                
+
             View row = makeAudioRow(icon, label, pkg, uid, s);
             audioLayout.addView(row);
             int count = audioLayout.getChildCount();
