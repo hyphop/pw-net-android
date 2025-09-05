@@ -112,17 +112,64 @@ private ScrollView audioScroll, mdnsScroll;
 
 private static final int MAX_ITEMS = 10;
 
+private static String pkg_name = "?";
+private static String vName = "?";
+private static long   vCode = -1;
+private static final int    api = android.os.Build.VERSION.SDK_INT;
+
+private void logVersions() {
+
+        Log.i(TAG, "Package=" + pkg_name
+            + " versionName=" + vName
+            + " versionCode=" + vCode
+            + " BUILD=" + Config.BUILD
+            + " GIT=" + Config.GIT
+            + " API=" + api
+            );
+
+}
+
+// Minimal HTML escaping for text inserted into Html.fromHtml()
+private String esc(String s) {
+    if (s == null) return "";
+    return s
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&#39;")
+        .replace(">", "&gt;");
+}
+
+private String esc(Object o) {
+    if (o == null) return "";
+    return esc(String.valueOf(o));
+}
+
 private CharSequence buildHelpHtml() {
+
   String html =
       "<h3><font color='#0AA4FF'>Quick Help</font></h3>"
-    + "<p><b><font color='#FFD60A'>Receivers</font></b>: discovered via mDNS. Tap to copy host:port.</p>"
+    + "<p><b><font color='#FFD60A'>Receivers</font></b>: discovered via mDNS " + esc(Config.MDNS_SRV_NAME) + ". Tap to copy host:port.</p>"
     + "<p><b><font color='#FFD60A'>Audio Source</font></b>: pick an <i>app</i> or "
     + "<i>Wide System / All Sounds</i>.</p>"
     + "<p><b><font color='#FFD60A'>Gain / Mute</font></b>: gain applies live; mute silences TX.</p>"
     + "<p><b><font color='#FFD60A'>Start</font></b>: asks for permissions and begins streaming.</p>"
     + "<p>Status shows TX bytes / kbps / attempts; tap to copy local IPs.</p>"
     + "<p>Docs: <a href='https://github.com/hyphop/pw-net-android'>Read full help</a></p>"
-    + "<p>Homepage: <a href='https://example.com/anything'>project page</a></p>";
+    + "<p>Homepage: <a href='https://example.com/anything'>project page</a></p>"
+
+      + "<h4><font color='#0AA4FF'>Build &amp; About</font></h4>"
+      + "<p>"
+      + "<b>Package</b>: "       + esc(pkg_name)   + "<br/>"
+      + "<b>Version Name</b>: "  + esc(vName)      + "<br/>"
+      + "<b>Version Code</b>: "  + esc(vCode)      + "<br/>"
+      + "<b>BUILD</b>: "         + esc(Config.BUILD) + "<br/>"
+      + "<b>GIT</b>: "           + esc(Config.GIT)   + "<br/>"
+      + "<b>API</b>: "           + api
+      + "</p>"
+
+      ;
+
   if (Build.VERSION.SDK_INT >= 24) return Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY);
   return Html.fromHtml(html);
 }
@@ -485,12 +532,17 @@ private static View.OnTouchListener makePressHighlightListener() {
     super.onCreate(b);
     Log.i(TAG, "created");
 
+    try {
+    pkg_name = getPackageName();
+    android.content.pm.PackageInfo pi =
+    getPackageManager().getPackageInfo(getPackageName(), 0);
+    vName = (pi.versionName != null) ? pi.versionName : "?";
+    vCode = (Build.VERSION.SDK_INT >= 28) ? pi.getLongVersionCode() : pi.versionCode;
+    } catch (Throwable ignore) {}
+    logVersions();
+
     prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
     logPrefs("onStartCommand", prefs);
-
-    int api = android.os.Build.VERSION.SDK_INT;
-    Log.i(TAG, "Running API=" + api);
-
 
     // just log the IPs on start
     for (String ip : getLocalWifiIPs(this)) {
@@ -503,6 +555,9 @@ private static View.OnTouchListener makePressHighlightListener() {
     root.setPadding(pad, pad, pad, pad);
     root.setGravity(Gravity.TOP|Gravity.START);
     root.setBackgroundColor(BG);
+
+    botTv = t("Disconnected");
+    root.addView(botTv);
 
     // Host field
     hostEt = new EditText(this);
@@ -634,8 +689,7 @@ topTv.setOnClickListener(new View.OnClickListener() {
 });
 
     root.addView(topTv);
-    botTv = t("Disconnected");
-    root.addView(botTv);
+
 
 // One horizontal row
 LinearLayout row = new LinearLayout(this);
