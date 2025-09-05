@@ -374,7 +374,7 @@ private static java.util.List<String> getLocalWifiIPs(Context ctx) {
 
   private void updateMdnsLabel() {
     int c = (candidatesLayout != null) ? candidatesLayout.getChildCount() : 0;
-    if ( mdnsLabel != null ) mdnsLabel.setText("mDNS List [" + c + "/" + mdnsEvents + "]");
+    if ( mdnsLabel != null ) mdnsLabel.setText("Receivers [" + c + "/" + mdnsEvents + "]");
     Log.i(TAG, "update mdns " + c + "/" + mdnsEvents );
   }
 
