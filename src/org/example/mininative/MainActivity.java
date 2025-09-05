@@ -61,6 +61,9 @@ import android.graphics.drawable.Drawable;  // remove if you drop icons
 
 import android.graphics.Rect;
 
+import android.text.Html;
+import android.text.method.LinkMovementMethod;
+
 public class MainActivity extends Activity {
   private MdnsDiscoverer mdns;
   private int mdnsEvents = 0;
@@ -81,6 +84,7 @@ public class MainActivity extends Activity {
   // colors
   private static final int CYAN  = 0xFF00FFFF;
   private static final int GRAY  = 0xFF666666;
+  private static final int LGRAY  = 0xFFAAAAAA;
   private static final int CYAN_DIM = 0xFF009999;
   private static final int BG    = 0xFF000000;
   private static final int BLUE  = 0xFF0A84FF;
@@ -99,10 +103,29 @@ public class MainActivity extends Activity {
 private LinearLayout candidatesLayout;   // mDNS list (already have)
 private LinearLayout audioLayout;        // Audio sources list
 private android.widget.FrameLayout switcher;
-private TextView mdnsLabel, audioLabel;  // from previous row
+private TextView mdnsLabel, helpLabel, audioLabel;  // from previous row
 private int currentTab = -1;
 
+private TextView helpText;
+private ScrollView helpScroll;
+private ScrollView audioScroll, mdnsScroll;
+
 private static final int MAX_ITEMS = 10;
+
+private CharSequence buildHelpHtml() {
+  String html =
+      "<h3><font color='#0AA4FF'>Quick Help</font></h3>"
+    + "<p><b><font color='#FFD60A'>Receivers</font></b>: discovered via mDNS. Tap to copy host:port.</p>"
+    + "<p><b><font color='#FFD60A'>Audio Source</font></b>: pick an <i>app</i> or "
+    + "<i>Wide System / All Sounds</i>.</p>"
+    + "<p><b><font color='#FFD60A'>Gain / Mute</font></b>: gain applies live; mute silences TX.</p>"
+    + "<p><b><font color='#FFD60A'>Start</font></b>: asks for permissions and begins streaming.</p>"
+    + "<p>Status shows TX bytes / kbps / attempts; tap to copy local IPs.</p>"
+    + "<p>Docs: <a href='https://github.com/hyphop/pw-net-android'>Read full help</a></p>"
+    + "<p>Homepage: <a href='https://example.com/anything'>project page</a></p>";
+  if (Build.VERSION.SDK_INT >= 24) return Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY);
+  return Html.fromHtml(html);
+}
 
 private View.OnClickListener makeSourceClickListener(final int uid, final String pkg) {
     return new View.OnClickListener() {
@@ -116,6 +139,7 @@ private View.OnClickListener makeSourceClickListener(final int uid, final String
                 .putString(KEY_SEL_PKG, pkg)
                 .apply();
             }
+            updateAudioLabel();
             populateAudioCandidates(uid);   // rebuild
         }
     };
@@ -407,17 +431,20 @@ private void updateAudioLabel(){
             + "]");
 }
 
-    private void showTab(int which) { // 0 = mDNS, 1 = Audio
-    if (which == currentTab) return;  // no-op if already active
-        currentTab = which;
+private void showTab(int which) { // 0=Receivers, 1=Help, 2=Audio
+  if (which == currentTab) return;
+  currentTab = which;
 
-    updateAudioLabel();
-    candidatesLayout.setVisibility(which == 0 ? View.VISIBLE : View.GONE);
-    audioLayout.setVisibility(which == 1 ? View.VISIBLE : View.GONE);
-    // active = yellow, inactive = white
-    if (mdnsLabel != null) mdnsLabel.setTextColor(which == 0 ? YEL : WHITE);
-    if (audioLabel != null) audioLabel.setTextColor(which == 1 ? YEL : WHITE);
-    }
+  if (mdnsScroll != null)  mdnsScroll.setVisibility(which == 0 ? View.VISIBLE : View.GONE);
+  if (helpScroll != null)  helpScroll.setVisibility(which == 1 ? View.VISIBLE : View.GONE);
+  if (audioScroll != null) audioScroll.setVisibility(which == 2 ? View.VISIBLE : View.GONE);
+
+  if (mdnsLabel != null) mdnsLabel.setTextColor(which == 0 ? YEL : WHITE);
+  if (helpLabel != null) helpLabel.setTextColor(which == 1 ? YEL : WHITE);
+  if (audioLabel != null) audioLabel.setTextColor(which == 2 ? YEL : WHITE);
+
+  updateAudioLabel();
+}
 
 private void logPrefs(String tag, SharedPreferences prefs) {
     if (prefs == null) {
@@ -619,73 +646,104 @@ row.setLayoutParams(new LinearLayout.LayoutParams(
 row.setPadding(0, dp(12), 0, dp(4));
 row.setGravity(Gravity.CENTER_VERTICAL);
 
-// Left: mDNS label, weight=1 to push right label to edge
-mdnsLabel = t("mDNS List [0/0]");
+// Left: mDNS label (Receivers)
+mdnsLabel = t("Receivers [0/0]");
 mdnsLabel.setClickable(true);
 LinearLayout.LayoutParams leftLp = new LinearLayout.LayoutParams(
     0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
 mdnsLabel.setLayoutParams(leftLp);
-mdnsLabel.setOnClickListener(new View.OnClickListener() {
-  @Override public void onClick(View v) {
-    Toast.makeText(MainActivity.this, "mDNS list cleared", Toast.LENGTH_SHORT).show();
-    updateMdnsLabel2Zero();
-  }
-});
 
-// Right: Audio Source (right-aligned naturally)
-audioLabel = t("Audio Source [0/0]");
-audioLabel.setClickable(true);
-
-LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(
+// Middle: Help label (new, no weight so it sits centered)
+helpLabel = t("Help");
+helpLabel.setClickable(true);
+LinearLayout.LayoutParams midLp = new LinearLayout.LayoutParams(
     LinearLayout.LayoutParams.WRAP_CONTENT,
     LinearLayout.LayoutParams.WRAP_CONTENT);
+helpLabel.setLayoutParams(midLp);
+
+// Right: Audio Source (weight 1, right-aligned)
+audioLabel = t("Audio Source [Sys]");
+audioLabel.setClickable(true);
+LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(
+    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+rightLp.gravity = Gravity.END;
 audioLabel.setLayoutParams(rightLp);
+audioLabel.setGravity(Gravity.END);
 
 // Add to layout
 row.addView(mdnsLabel);
+row.addView(helpLabel);
 row.addView(audioLabel);
 root.addView(row);
 
 // === after you create the row with mdnsLabel + audioLabel ===
 
-// Switcher that stacks the two lists
+// Switcher stays weighted (you already set height 0, weight 1)
 switcher = new android.widget.FrameLayout(this);
 switcher.setLayoutParams(new LinearLayout.LayoutParams(
-    LinearLayout.LayoutParams.MATCH_PARENT,
-    LinearLayout.LayoutParams.WRAP_CONTENT));
+    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 root.addView(switcher);
 
-// Left pane: mDNS candidates
+// --- Help (default visible) ---
+helpScroll = new ScrollView(this);
+helpScroll.setFillViewport(true);
+
+helpText = new TextView(this);
+helpText.setTextColor(LGRAY);
+helpText.setTextSize(16);
+helpText.setPadding(dp(0), dp(8), dp(0), dp(16));
+helpText.setText(buildHelpHtml());                         // rich text
+helpText.setLinksClickable(true);
+helpText.setMovementMethod(LinkMovementMethod.getInstance()); // enable <a>
+//helpText.setTextIsSelectable(true);
+
+helpScroll.addView(helpText);
+switcher.addView(helpScroll);
+
+// --- Receivers (mDNS) ---
+mdnsScroll = new ScrollView(this);
+mdnsScroll.setFillViewport(true);
+
 candidatesLayout = new LinearLayout(this);
 candidatesLayout.setOrientation(LinearLayout.VERTICAL);
 candidatesLayout.setPadding(0, dp(4), 0, 0);
-switcher.addView(candidatesLayout);
 
-// Right pane: Audio sources list (start hidden)
+mdnsScroll.addView(candidatesLayout);
+mdnsScroll.setVisibility(View.GONE);
+switcher.addView(mdnsScroll);
+
+// --- Audio sources ---
+audioScroll = new ScrollView(this);
+audioScroll.setFillViewport(true);
+
 audioLayout = new LinearLayout(this);
 audioLayout.setOrientation(LinearLayout.VERTICAL);
 audioLayout.setPadding(0, dp(4), 0, 0);
-audioLayout.setVisibility(View.GONE);
-ScrollView scroll = new ScrollView(this);
-scroll.addView(audioLayout);
 
-//switcher.addView(audioLayout);
-switcher.addView(scroll);
+audioScroll.addView(audioLayout);
+audioScroll.setVisibility(View.GONE);
+switcher.addView(audioScroll);
 
-// Clicks to switch panes (no lambdas)
+// Clicks to switch panes
 mdnsLabel.setOnClickListener(new View.OnClickListener() {
   @Override public void onClick(View v) { showTab(0); }
 });
 
+
+helpLabel.setOnClickListener(new View.OnClickListener() {
+  @Override public void onClick(View v) { showTab(1); }
+});
+
 audioLabel.setOnClickListener(new View.OnClickListener() {
   @Override public void onClick(View v) {
-    showTab(1);
+    showTab(2);
     onAudioSourceClick();
   }
 });
 
-audioLabel.setOnTouchListener(makePressHighlightListener());
 mdnsLabel.setOnTouchListener(makePressHighlightListener());
+helpLabel.setOnTouchListener(makePressHighlightListener());
+audioLabel.setOnTouchListener(makePressHighlightListener());
 
 // (Optional) keep your old "clear mDNS" on long-press
 mdnsLabel.setOnLongClickListener(new View.OnLongClickListener() {
@@ -699,7 +757,7 @@ mdnsLabel.setOnLongClickListener(new View.OnLongClickListener() {
 });
 
 // default view
-showTab(0);
+showTab(1);
 
     // Gain live updates
     gainSb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
