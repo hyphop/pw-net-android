@@ -44,6 +44,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import android.view.MotionEvent;
+
 // Java util
 import java.util.List;
 import java.util.Set;
@@ -56,6 +58,8 @@ import java.util.Collections;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.ResolveInfo;
 import android.graphics.drawable.Drawable;  // remove if you drop icons
+
+import android.graphics.Rect;
 
 public class MainActivity extends Activity {
   private MdnsDiscoverer mdns;
@@ -99,7 +103,6 @@ private TextView mdnsLabel, audioLabel;  // from previous row
 private int currentTab = -1;
 
 private static final int MAX_ITEMS = 10;
-private static final Set<String> pkgs = new TreeSet<>();
 
 private View.OnClickListener makeSourceClickListener(final int uid, final String pkg) {
     return new View.OnClickListener() {
@@ -114,12 +117,12 @@ private View.OnClickListener makeSourceClickListener(final int uid, final String
                 .apply();
             }
             populateAudioCandidates(uid);   // rebuild
-
         }
     };
 }
 
-private View makeAudioRow(Drawable icon, CharSequence label, final String pkg, final int uid, boolean selected) {
+private View makeAudioRow(Drawable icon, CharSequence label,
+        final String pkg, final int uid, boolean selected, int pos) {
     LinearLayout row = new LinearLayout(this);
     row.setOrientation(LinearLayout.HORIZONTAL);
     row.setGravity(Gravity.CENTER_VERTICAL);
@@ -167,7 +170,21 @@ private View makeAudioRow(Drawable icon, CharSequence label, final String pkg, f
 
     // Click → delegate
     row.setOnClickListener(makeSourceClickListener(uid, pkg));
+    row.setFocusable(selected);
+    audioLayout.addView(row);
 
+if (selected) {
+    final View rowFinal = row;
+    rowFinal.post(new Runnable() {
+        @Override public void run() {
+            Rect r = new Rect(0, 0, rowFinal.getWidth(), rowFinal.getHeight());
+            rowFinal.requestRectangleOnScreen(r, true); // ScrollView handles the scrolling
+            // another way
+            //ScrollView sc = (ScrollView) audioLayout.getParent();
+            //sc.smoothScrollTo(0, rowFinal.getTop()); // now layout is done, y is correct
+        }
+    });
+}
     return row;
 }
 
@@ -175,15 +192,31 @@ private void populateAudioCandidates(final Integer selUid) {
     Log.i(TAG, "populateAudioCandidates " + selUid);
 
     if (audioLayout == null) return;
-    audioLayout.removeAllViews();
 
     PackageManager pm = getPackageManager();
 
     int curUid  = prefs.getInt(KEY_SEL_UID, -1);
     String curPkg = prefs.getString(KEY_SEL_PKG, "");
+    int countApps = audioLayout.getChildCount();
 
-    Log.i(TAG, "+ u:" + curUid + " p:" + curPkg);
+    Log.i(TAG, "AudioSource:"
+            + " uid=" + curUid
+            + " pkg=" + curPkg
+            + " count=" + countApps );
 
+    if ( countApps > 0 ){
+        Log.i(TAG, "AudioSource: already was done");
+        /*
+        View row = audioLayout.getChildAt(i);
+        row.setBackground(makeBg(BLUE, GRAY));
+        row.setTextColor(WHITE);
+        return;
+        */
+    }
+
+    audioLayout.removeAllViews();
+
+    Set<String> pkgs = new TreeSet<>();
     pkgs.add("");
     pkgs.add("org.mozilla.firefox");
 
@@ -209,10 +242,9 @@ for (ResolveInfo ri : pm.queryIntentActivities(v, 0))
         Log.i(TAG,"++++ " + ri.activityInfo.packageName);
     }
 
-///
     boolean s = false;
-
-        // Print results
+    int pos = 0;
+    int act = 0;
     for (String pkg : pkgs) {
         try {
             CharSequence label;
@@ -224,11 +256,12 @@ for (ResolveInfo ri : pm.queryIntentActivities(v, 0))
                 icon = pm.getApplicationIcon(ai);
                 uid = ai.uid;
             } else {
-                label = "Wide";
+                label = "Wide System / All Sounds";
                 icon = getResources().getDrawable(android.R.drawable.ic_media_play);
             }
 
             s = uid == curUid;
+            if (s) act = pos;
 
             Log.i(TAG, "media"
                     + " pkg=" + pkg
@@ -237,23 +270,22 @@ for (ResolveInfo ri : pm.queryIntentActivities(v, 0))
                     + " s=" + s
                     );
 
-            View row = makeAudioRow(icon, label, pkg, uid, s);
-            audioLayout.addView(row);
-            int count = audioLayout.getChildCount();
-            Log.i("TAG", "items: " + count);
-            //View row = audioLayout.getChildAt(i);
+            //View row =
+                makeAudioRow(icon, label, pkg, uid, s, pos++);
+            //audioLayout.addView(row);
 
         } catch (PackageManager.NameNotFoundException ignore) {
         }
+
+        countApps = audioLayout.getChildCount();
+        Log.i("TAG", "items: " + countApps);
+
     }
 
 }
 
-// Call this when user taps "Audio Source"
 private void onAudioSourceClick() {
-  // Ask NLService for a snapshot
   Log.i(TAG, "onClick audio Source");
-  //logMediaApps(this);
   populateAudioCandidates(-2);
 }
 
@@ -365,10 +397,21 @@ private static java.util.List<String> getLocalWifiIPs(Context ctx) {
     return false;
     }
 
+private void updateAudioLabel(){
+    int c = 0;
+    int u = prefs.getInt(KEY_SEL_UID, -1);
+    String S = u > 0 ? "App" : "Sys";
+    if ( audioLayout != null ) c = audioLayout.getChildCount();
+    audioLabel.setText("Audio Source [" + S
+            // + "/" + c
+            + "]");
+}
+
     private void showTab(int which) { // 0 = mDNS, 1 = Audio
     if (which == currentTab) return;  // no-op if already active
         currentTab = which;
 
+    updateAudioLabel();
     candidatesLayout.setVisibility(which == 0 ? View.VISIBLE : View.GONE);
     audioLayout.setVisibility(which == 1 ? View.VISIBLE : View.GONE);
     // active = yellow, inactive = white
@@ -388,6 +431,28 @@ private void logPrefs(String tag, SharedPreferences prefs) {
     }
     Log.i(TAG, "---- END PREFS ----");
 }
+
+
+private static View.OnTouchListener makePressHighlightListener() {
+    return new View.OnTouchListener() {
+        @Override
+        public boolean onTouch(View v, MotionEvent event) {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    v.setBackgroundColor(GRAY);   // pressed
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    v.setBackgroundColor(BG);     // restore
+                    v.performClick();             // still fire click
+                    return true;
+            }
+            return false;
+        }
+    };
+}
+
 
   @Override protected void onCreate(Bundle b) {
     super.onCreate(b);
@@ -618,6 +683,9 @@ audioLabel.setOnClickListener(new View.OnClickListener() {
     onAudioSourceClick();
   }
 });
+
+audioLabel.setOnTouchListener(makePressHighlightListener());
+mdnsLabel.setOnTouchListener(makePressHighlightListener());
 
 // (Optional) keep your old "clear mDNS" on long-press
 mdnsLabel.setOnLongClickListener(new View.OnLongClickListener() {
